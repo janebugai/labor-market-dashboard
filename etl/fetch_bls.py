@@ -17,14 +17,28 @@ load_dotenv()
 BLS_API_KEY = os.getenv("BLS_API_KEY")
 BLS_BASE_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/"
 
-# National series.
-# LNS14000000        = National unemployment rate (seasonally adjusted)
-# CES0000000001      = Total nonfarm payroll employment
-# CES0500000003      = Average hourly earnings, total private
+# National series (all seasonally adjusted).
+#   LNS14000000              Unemployment rate (U-3)
+#   LNS13327709              Underemployment rate (U-6)
+#   LNS11300000              Labor force participation rate
+#   LNS12300000              Employment-population ratio, 16+
+#   LNS12300060              Employment-population ratio, prime age (25-54)
+#   CES0000000001            Total nonfarm payroll employment (thousands)
+#   CES0500000003            Average hourly earnings, total private
+#   CES0500000002            Average weekly hours, total private
+#   JTS000000000000000JOL    Job openings, total nonfarm (thousands) — JOLTS
+#   JTS000000000000000QUR    Quits rate, total nonfarm — JOLTS
 NATIONAL_SERIES_IDS = {
     "unemployment_rate_national": "LNS14000000",
+    "u6_underemployment": "LNS13327709",
+    "labor_force_participation": "LNS11300000",
+    "employment_population_ratio": "LNS12300000",
+    "prime_age_epop": "LNS12300060",
     "nonfarm_payrolls": "CES0000000001",
     "avg_hourly_earnings": "CES0500000003",
+    "avg_weekly_hours": "CES0500000002",
+    "job_openings": "JTS000000000000000JOL",
+    "quits_rate": "JTS000000000000000QUR",
 }
 
 # State FIPS codes, including Washington, D.C. and Puerto Rico, matching the

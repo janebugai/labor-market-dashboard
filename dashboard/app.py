@@ -1,215 +1,154 @@
 """
 Labor Market Dashboard — Streamlit app.
 
+A consolidated read on the U.S. labor market built on BLS household (CPS),
+establishment (CES) and job-openings (JOLTS) data, plus a Census ACS
+cross-section of the states.
+
 Run with: streamlit run dashboard/app.py
 """
 import os
 
+import numpy as np
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
-from plotly.colors import sample_colorscale
 import streamlit as st
 from sqlalchemy import create_engine
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "labor_market.db")
 
-COLORS = {
-    "brown": "#25170B",
-    "blue": "#7591BC",
-    "blue_light": "#7A96C1",
-    "navy": "#0D1A32",
-    "green": "#253F2B",
-    "yellow": "#C5BF50",
-    "sky": "#63BAE4",
-    "background": "#F0F0F0",
-    "surface": "#FBF8F1",
-    "gold": "#C99A45",
-}
-STATE_COLOR_SCALE = [
-    [0.0, "#4747FF"],
-    [0.5, "#C4C3CA"],
-    [1.0, "#FFC067"],
-]
+# --------------------------------------------------------------------------
+# Design tokens
+# --------------------------------------------------------------------------
+INK = "#1A2238"
+INK_MUTED = "#5B6B87"
+PAGE_BG = "#F4F3EF"
+SURFACE = "#FFFFFF"
+HAIRLINE = "rgba(26, 34, 56, 0.09)"
+GRID = "rgba(26, 34, 56, 0.07)"
 
-STATE_ABBREVIATIONS_BY_FIPS = {
-    "01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA",
-    "08": "CO", "09": "CT", "10": "DE", "11": "DC", "12": "FL",
-    "13": "GA", "15": "HI", "16": "ID", "17": "IL", "18": "IN",
-    "19": "IA", "20": "KS", "21": "KY", "22": "LA", "23": "ME",
-    "24": "MD", "25": "MA", "26": "MI", "27": "MN", "28": "MS",
-    "29": "MO", "30": "MT", "31": "NE", "32": "NV", "33": "NH",
-    "34": "NJ", "35": "NM", "36": "NY", "37": "NC", "38": "ND",
-    "39": "OH", "40": "OK", "41": "OR", "42": "PA", "44": "RI",
-    "45": "SC", "46": "SD", "47": "TN", "48": "TX", "49": "UT",
-    "50": "VT", "51": "VA", "53": "WA", "54": "WV", "55": "WI",
-    "56": "WY", "72": "PR",
+ACCENT = "#2457C5"        # primary / single-series
+SERIES = ["#2457C5", "#C9631C", "#0B8A78"]   # categorical, CVD-checked, fixed order
+POS = "#1B7A3D"
+NEG = "#B23A32"
+RECESSION_FILL = "rgba(26, 34, 56, 0.06)"
+
+# Diverging scale for state deviation from the national rate:
+# below national (better) -> blue, at national -> paper, above (worse) -> orange
+DIVERGING = [[0.0, "#2457C5"], [0.5, "#EDEBE4"], [1.0, "#C9631C"]]
+
+# NBER recession(s) inside the 2016+ window.
+RECESSIONS = [("2020-02-01", "2020-04-30", "COVID-19")]
+
+FONT_STACK = "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+
+# --------------------------------------------------------------------------
+# Series metadata
+# --------------------------------------------------------------------------
+# kind: "pct" (percentage points), "level_k" (thousands), "dollar", "hours"
+# good: which direction is favourable, for colouring deltas
+SERIES_META = {
+    "unemployment_rate_national": dict(label="Unemployment rate", tag="U-3 · CPS", kind="pct", good="down"),
+    "u6_underemployment": dict(label="Underemployment rate", tag="U-6 · CPS", kind="pct", good="down"),
+    "labor_force_participation": dict(label="Labor force participation", tag="16+ · CPS", kind="pct", good="up"),
+    "employment_population_ratio": dict(label="Employment-population ratio", tag="16+ · CPS", kind="pct", good="up"),
+    "prime_age_epop": dict(label="Prime-age employment rate", tag="25–54 · CPS", kind="pct", good="up"),
+    "nonfarm_payrolls": dict(label="Nonfarm payrolls", tag="CES", kind="level_k", good="up"),
+    "avg_hourly_earnings": dict(label="Average hourly earnings", tag="Total private · CES", kind="dollar", good="up"),
+    "avg_weekly_hours": dict(label="Average weekly hours", tag="Total private · CES", kind="hours", good="up"),
+    "job_openings": dict(label="Job openings", tag="JOLTS", kind="level_k", good="up"),
+    "quits_rate": dict(label="Quits rate", tag="JOLTS", kind="pct", good="up"),
 }
 
-st.set_page_config(page_title="Labor Market Dashboard", layout="wide")
+STATE_ABBR_BY_FIPS = {
+    "01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA", "08": "CO",
+    "09": "CT", "10": "DE", "11": "DC", "12": "FL", "13": "GA", "15": "HI",
+    "16": "ID", "17": "IL", "18": "IN", "19": "IA", "20": "KS", "21": "KY",
+    "22": "LA", "23": "ME", "24": "MD", "25": "MA", "26": "MI", "27": "MN",
+    "28": "MS", "29": "MO", "30": "MT", "31": "NE", "32": "NV", "33": "NH",
+    "34": "NJ", "35": "NM", "36": "NY", "37": "NC", "38": "ND", "39": "OH",
+    "40": "OK", "41": "OR", "42": "PA", "44": "RI", "45": "SC", "46": "SD",
+    "47": "TN", "48": "TX", "49": "UT", "50": "VT", "51": "VA", "53": "WA",
+    "54": "WV", "55": "WI", "56": "WY", "72": "PR",
+}
+
+st.set_page_config(page_title="U.S. Labor Market Dashboard", layout="wide")
 
 st.markdown(
     f"""
     <style>
-    .stApp {{
-        background-color: {COLORS["background"]};
-        color: {COLORS["navy"]};
+    .stApp {{ background-color: {PAGE_BG}; }}
+    .block-container, [data-testid="stMainBlockContainer"] {{
+        padding-top: 2.75rem; max-width: 1280px;
     }}
-    .block-container,
-    [data-testid="stMainBlockContainer"] {{
-        padding-top: 2.5rem;
-    }}
-    [data-testid="stHeader"] {{
-        background-color: rgba(240, 240, 240, 0.92);
-    }}
-    h1, h2, h3, h4, p, label {{
-        color: {COLORS["navy"]};
-    }}
-    [data-testid="stCaptionContainer"] {{
-        margin-bottom: 1.5rem;
-    }}
-    button[data-baseweb="tab"] {{
-        color: {COLORS["blue"]};
-        font-weight: 600;
-    }}
-    button[data-baseweb="tab"][aria-selected="true"] {{
-        color: {COLORS["green"]};
-        border-bottom-color: {COLORS["yellow"]};
-    }}
-    [data-testid="stMetric"] {{
-        background-color: {COLORS["surface"]};
-        border: 1px solid rgba(13, 26, 50, 0.10);
-        border-radius: 1rem;
-        padding: 0.75rem;
-    }}
-    [data-testid="stVerticalBlockBorderWrapper"],
-    [data-testid="stPlotlyChart"],
-    [data-testid="stDataFrame"] {{
-        background-color: {COLORS["surface"]};
-        border: 1px solid rgba(13, 26, 50, 0.10);
-        border-radius: 1rem;
-        box-shadow: 0 8px 24px rgba(13, 26, 50, 0.06);
-    }}
-    [data-testid="stPlotlyChart"] {{
-        overflow: hidden;
-    }}
-    .hero-kicker {{
-        color: {COLORS["gold"]};
-        font-size: 0.78rem;
-        font-weight: 800;
-        letter-spacing: 0.12em;
-        margin-bottom: 0.5rem;
-        text-transform: uppercase;
+    [data-testid="stHeader"] {{ background: transparent; }}
+    html, body, [class*="css"] {{ font-family: {FONT_STACK}; }}
+    h1, h2, h3, h4, p, label, span, div {{ color: {INK}; }}
+
+    .eyebrow {{
+        color: {INK_MUTED}; font-size: 0.72rem; font-weight: 700;
+        letter-spacing: 0.16em; text-transform: uppercase;
     }}
     .hero-title {{
-        color: {COLORS["navy"]};
-        font-family: Georgia, "Times New Roman", serif;
-        font-size: clamp(2.25rem, 5vw, 4rem);
-        font-weight: 700;
-        letter-spacing: -0.04em;
-        line-height: 1;
-        margin: 0 0 0.65rem;
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700;
+        letter-spacing: -0.03em; line-height: 1.02; margin: 0.35rem 0 0.5rem;
     }}
-    .hero-period {{
-        color: {COLORS["gold"]};
-        font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        font-size: clamp(0.9rem, 1.8vw, 1.4rem);
-        font-weight: 700;
-        letter-spacing: 0;
-        margin-right: 0.6rem;
-        vertical-align: 0.35em;
-        white-space: nowrap;
+    .hero-period {{ color: {ACCENT}; font-family: {FONT_STACK};
+        font-weight: 700; font-size: 0.5em; vertical-align: 0.42em; }}
+    .hero-sub {{ color: {INK_MUTED}; font-size: 0.95rem; line-height: 1.6;
+        max-width: 62ch; margin-bottom: 0.4rem; }}
+
+    .summary {{
+        background: {SURFACE}; border: 1px solid {HAIRLINE}; border-radius: 14px;
+        padding: 1.1rem 1.3rem; margin: 1.4rem 0 0.4rem;
     }}
-    .hero-copy {{
-        color: {COLORS["blue"]};
-        font-size: 0.9rem;
-        line-height: 1.6;
-        margin-bottom: 1rem;
-        max-width: none;
+    .summary p {{ margin: 0; font-size: 0.95rem; line-height: 1.65; color: {INK}; }}
+    .summary .lede {{ color: {INK_MUTED}; font-size: 0.72rem; font-weight: 700;
+        letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 0.5rem; }}
+
+    .kpi {{
+        background: {SURFACE}; border: 1px solid {HAIRLINE}; border-radius: 14px;
+        padding: 1rem 1.1rem 0.5rem; height: 100%;
     }}
-    .kpi-card {{
-        background: {COLORS["surface"]};
-        border: 1px solid rgba(13, 26, 50, 0.10);
-        border-radius: 1rem;
-        box-shadow: 0 8px 24px rgba(13, 26, 50, 0.06);
-        margin-bottom: 1rem;
-        min-height: 138px;
-        padding: 1rem 1.1rem;
+    .kpi-head {{ min-height: 2.4rem; }}
+    .kpi-label {{ display: block; font-size: 0.82rem; font-weight: 700;
+        color: {INK}; line-height: 1.25; }}
+    .kpi-tag {{ display: block; font-size: 0.64rem; font-weight: 600;
+        letter-spacing: 0.07em; text-transform: uppercase; color: {INK_MUTED};
+        margin-top: 0.15rem; }}
+    .kpi-value {{ font-size: 1.9rem; font-weight: 800; letter-spacing: -0.02em;
+        margin: 0.35rem 0 0.15rem; line-height: 1; }}
+    .kpi-delta {{ font-size: 0.8rem; font-weight: 600; }}
+    .kpi-delta .muted {{ color: {INK_MUTED}; font-weight: 500; }}
+    .pos {{ color: {POS}; }} .neg {{ color: {NEG}; }} .flat {{ color: {INK_MUTED}; }}
+
+    [data-testid="stMetric"] {{
+        background: {SURFACE}; border: 1px solid {HAIRLINE};
+        border-radius: 12px; padding: 0.85rem 1rem;
     }}
-    .kpi-top {{
-        align-items: center;
-        display: flex;
-        gap: 0.65rem;
+    [data-testid="stPlotlyChart"] {{
+        background: {SURFACE}; border: 1px solid {HAIRLINE};
+        border-radius: 14px; padding: 0.4rem 0.6rem; overflow: hidden;
     }}
-    .kpi-icon {{
-        align-items: center;
-        background: {COLORS["navy"]};
-        border-radius: 50%;
-        color: {COLORS["surface"]};
-        display: inline-flex;
-        font-size: 1rem;
-        height: 2.35rem;
-        justify-content: center;
-        width: 2.35rem;
-    }}
-    .kpi-label {{
-        color: {COLORS["navy"]};
-        font-size: 0.68rem;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        line-height: 1.2;
-        text-transform: uppercase;
-    }}
-    .kpi-value {{
-        color: {COLORS["navy"]};
-        font-size: 1.65rem;
-        font-weight: 800;
-        line-height: 1.2;
-        margin: 0.65rem 0 0.2rem;
-    }}
-    .kpi-note {{
-        color: {COLORS["blue"]};
-        font-size: 0.72rem;
-    }}
-    hr {{
-        border-color: {COLORS["blue_light"]};
-    }}
+    [data-testid="stDataFrame"] {{ border: 1px solid {HAIRLINE}; border-radius: 12px; }}
+    .kpi [data-testid="stPlotlyChart"] {{ border: none; padding: 0; background: transparent; }}
+
+    button[data-baseweb="tab"] {{ font-weight: 600; color: {INK_MUTED}; }}
+    button[data-baseweb="tab"][aria-selected="true"] {{ color: {INK}; }}
+    [data-baseweb="tab-highlight"] {{ background-color: {ACCENT}; }}
+    .stTabs [data-baseweb="tab-list"] {{ gap: 1.5rem; border-bottom: 1px solid {HAIRLINE}; }}
+
+    .section-h {{ font-size: 1.15rem; font-weight: 700; margin: 1.6rem 0 0.2rem; }}
+    .section-note {{ color: {INK_MUTED}; font-size: 0.82rem; margin-bottom: 0.6rem; }}
+    .foot {{ color: {INK_MUTED}; font-size: 0.78rem; line-height: 1.7;
+        border-top: 1px solid {HAIRLINE}; margin-top: 2.5rem; padding-top: 1rem; }}
+    hr {{ border-color: {HAIRLINE}; }}
+
     @media (max-width: 768px) {{
-        .block-container,
-        [data-testid="stMainBlockContainer"] {{
-            padding: 2.25rem 0.75rem 1rem;
-        }}
-        h1 {{
-            font-size: 1.75rem !important;
-            line-height: 1.2 !important;
-        }}
-        h2, h3 {{
-            font-size: 1.25rem !important;
-        }}
-        [data-testid="stCaptionContainer"] {{
-            margin-bottom: 0.75rem;
-        }}
-        [data-testid="stHorizontalBlock"] {{
-            flex-direction: column;
-            gap: 0.5rem;
-        }}
-        [data-testid="stColumn"],
-        [data-testid="column"] {{
-            width: 100% !important;
-            min-width: 100% !important;
-            flex: 1 1 100% !important;
-        }}
-        [data-testid="stPlotlyChart"],
-        [data-testid="stDataFrame"] {{
-            width: 100% !important;
-            overflow-x: auto;
-        }}
-        .hero-title {{
-            font-size: 2.3rem;
-        }}
-        .kpi-card {{
-            min-height: 120px;
-        }}
+        .block-container, [data-testid="stMainBlockContainer"] {{ padding: 2.25rem 0.8rem 1rem; }}
+        [data-testid="stHorizontalBlock"] {{ flex-direction: column; gap: 0.6rem; }}
+        [data-testid="stColumn"] {{ width: 100% !important; min-width: 100% !important; }}
     }}
     </style>
     """,
@@ -217,413 +156,597 @@ st.markdown(
 )
 
 
+# --------------------------------------------------------------------------
+# Data
+# --------------------------------------------------------------------------
 @st.cache_data
-def load_data(db_modified_at):
+def load_data(_db_mtime):
     engine = create_engine(f"sqlite:///{DB_PATH}")
-    bls_df = pd.read_sql("SELECT * FROM bls_timeseries", engine, parse_dates=["date"])
-    census_df = pd.read_sql("SELECT * FROM census_state_snapshot", engine)
-    return bls_df, census_df
+    bls = pd.read_sql("SELECT * FROM bls_timeseries", engine, parse_dates=["date"])
+    census = pd.read_sql("SELECT * FROM census_state_snapshot", engine)
+    return bls, census
 
-
-def apply_chart_theme(fig):
-    fig.update_layout(
-        paper_bgcolor=COLORS["surface"],
-        plot_bgcolor=COLORS["surface"],
-        font={"color": COLORS["navy"]},
-        title={"x": 0.5, "xanchor": "center"},
-        title_font={"color": COLORS["navy"]},
-        hoverlabel={
-            "bgcolor": COLORS["navy"],
-            "font_color": COLORS["surface"],
-            "bordercolor": COLORS["sky"],
-        },
-    )
-    fig.update_xaxes(
-        gridcolor="rgba(122, 150, 193, 0.25)",
-        linecolor=COLORS["blue_light"],
-        tickcolor=COLORS["blue_light"],
-    )
-    fig.update_yaxes(
-        gridcolor="rgba(122, 150, 193, 0.25)",
-        linecolor=COLORS["blue_light"],
-        tickcolor=COLORS["blue_light"],
-    )
-    return fig
-
-
-def series_snapshot(bls_data, series_name):
-    series = (
-        bls_data[bls_data["series_name"] == series_name]
-        .dropna(subset=["value"])
-        .sort_values("date")
-    )
-    if series.empty:
-        return None, None, None
-
-    latest = series.iloc[-1]
-    previous_value = series.iloc[-2]["value"] if len(series) > 1 else latest["value"]
-    return latest["value"], latest["value"] - previous_value, latest["date"]
-
-
-def render_kpi(icon, label, value, note):
-    st.markdown(
-        f"""
-        <div class="kpi-card">
-            <div class="kpi-top">
-                <span class="kpi-icon">{icon}</span>
-                <span class="kpi-label">{label}</span>
-            </div>
-            <div class="kpi-value">{value}</div>
-            <div class="kpi-note">{note}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 try:
     bls_df, census_df = load_data(os.path.getmtime(DB_PATH))
-except Exception as e:
+except Exception:
     st.error(
         "Couldn't load the database. Run the ETL pipeline first:\n\n"
         "```\npython etl/fetch_bls.py\npython etl/fetch_census.py\npython etl/transform.py\n```"
     )
     st.stop()
 
-dashboard = st.container()
+national_df = bls_df[bls_df["state_fips"].isna()].copy()
+state_df = bls_df[bls_df["state_fips"].notna()].copy()
 
-# --- Consolidated dashboard ---
-national_dates = bls_df.loc[bls_df["state_fips"].isna(), "date"]
-latest_period = (
-    national_dates.max().strftime("%B %Y") if not national_dates.dropna().empty else ""
+
+# --------------------------------------------------------------------------
+# Formatting + snapshots
+# --------------------------------------------------------------------------
+def fmt_value(name, v):
+    if v is None or pd.isna(v):
+        return "—"
+    kind = SERIES_META[name]["kind"]
+    if kind == "pct":
+        return f"{v:.1f}%"
+    if kind == "dollar":
+        return f"${v:,.2f}"
+    if kind == "hours":
+        return f"{v:.1f} hrs"
+    if kind == "level_k":
+        return f"{v / 1000:,.1f}M" if v >= 1000 else f"{v:,.0f}K"
+    return f"{v:,.1f}"
+
+
+def fmt_delta(name, d):
+    if d is None or pd.isna(d):
+        return "—"
+    kind = SERIES_META[name]["kind"]
+    if kind == "pct":
+        return f"{d:+.1f} pp"
+    if kind == "dollar":
+        return f"{d:+.2f}"
+    if kind == "hours":
+        return f"{d:+.1f} hr"
+    if kind == "level_k":
+        return f"{d:+,.0f}K"
+    return f"{d:+,.1f}"
+
+
+def delta_class(name, d):
+    if d is None or pd.isna(d) or abs(d) < 1e-9:
+        return "flat"
+    good = SERIES_META[name]["good"]
+    improving = (d > 0 and good == "up") or (d < 0 and good == "down")
+    return "pos" if improving else "neg"
+
+
+def snapshot(name):
+    s = (
+        national_df[national_df["series_name"] == name]
+        .dropna(subset=["value"])
+        .sort_values("date")
+    )
+    if s.empty:
+        return None
+    latest = s.iloc[-1]
+    prev = s.iloc[-2] if len(s) > 1 else latest
+    year_ago_rows = s[s["date"] == latest["date"] - pd.DateOffset(years=1)]
+    year_ago = year_ago_rows["value"].iloc[0] if not year_ago_rows.empty else np.nan
+    return dict(
+        value=latest["value"],
+        mom=latest["value"] - prev["value"],
+        yoy=latest["value"] - year_ago if pd.notna(year_ago) else np.nan,
+        date=latest["date"],
+        history=s,
+    )
+
+
+SNAP = {name: snapshot(name) for name in SERIES_META}
+LATEST_PERIOD = max(s["date"] for s in SNAP.values() if s)
+
+
+# --------------------------------------------------------------------------
+# Chart helpers
+# --------------------------------------------------------------------------
+def theme(fig, height=380, legend=True):
+    fig.update_layout(
+        height=height,
+        paper_bgcolor=SURFACE,
+        plot_bgcolor=SURFACE,
+        font=dict(color=INK_MUTED, family=FONT_STACK, size=12),
+        margin=dict(l=48, r=64, t=52, b=36),
+        title=dict(font=dict(color=INK, size=15), x=0, xanchor="left", y=0.97),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor=INK, font_color="white", bordercolor=INK, font_size=12),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+            font=dict(color=INK_MUTED, size=11), bgcolor="rgba(0,0,0,0)",
+        ),
+        showlegend=legend,
+    )
+    fig.update_xaxes(
+        showgrid=False, linecolor=HAIRLINE, tickcolor=HAIRLINE,
+        ticks="outside", tickfont=dict(color=INK_MUTED, size=11),
+    )
+    fig.update_yaxes(
+        gridcolor=GRID, zeroline=False, linecolor="rgba(0,0,0,0)",
+        ticks="", tickfont=dict(color=INK_MUTED, size=11),
+    )
+    return fig
+
+
+def add_recessions(fig, label=True):
+    for x0, x1, name in RECESSIONS:
+        fig.add_vrect(x0=x0, x1=x1, fillcolor=RECESSION_FILL, line_width=0, layer="below")
+        if label:
+            fig.add_annotation(
+                x=x1, y=1, yref="paper", yanchor="bottom", xanchor="left",
+                text=f"  {name} recession", showarrow=False,
+                font=dict(color=INK_MUTED, size=10),
+            )
+    return fig
+
+
+def latest_dot(fig, d, color, y_fmt):
+    last = d.iloc[-1]
+    fig.add_trace(go.Scatter(
+        x=[last["date"]], y=[last["value"]], mode="markers",
+        marker=dict(color=color, size=9, line=dict(color=SURFACE, width=2)),
+        showlegend=False, hoverinfo="skip",
+    ))
+    fig.add_annotation(
+        x=last["date"], y=last["value"], xshift=8, xanchor="left", yanchor="middle",
+        text=f"<b>{y_fmt(last['value'])}</b>", showarrow=False,
+        font=dict(color=color, size=12),
+    )
+
+
+def line_panel(specs, title, y_fmt, hover_unit="", height=380, recessions=True, rec_label=True):
+    """specs: list of (series_name, label, color)."""
+    fig = go.Figure()
+    multi = len(specs) > 1
+    for name, label, color in specs:
+        d = national_df[national_df["series_name"] == name].dropna(subset=["value"]).sort_values("date")
+        fig.add_trace(go.Scatter(
+            x=d["date"], y=d["value"], name=label, mode="lines",
+            line=dict(color=color, width=2.2),
+            hovertemplate=f"{label}: %{{y:,.1f}}{hover_unit}<extra></extra>",
+        ))
+        latest_dot(fig, d, color, y_fmt)
+    fig.update_layout(title=title)
+    theme(fig, height=height, legend=multi)
+    if recessions:
+        add_recessions(fig, label=rec_label)
+    # headroom on the right so the latest-value labels aren't clipped
+    span = national_df["date"].max() - national_df["date"].min()
+    fig.update_xaxes(range=[national_df["date"].min(),
+                            national_df["date"].max() + span * 0.09])
+    return fig
+
+
+def sparkline(d, color, height=52):
+    fig = go.Figure(go.Scatter(
+        x=d["date"], y=d["value"], mode="lines",
+        line=dict(color=color, width=1.8), hoverinfo="skip",
+    ))
+    last = d.iloc[-1]
+    fig.add_trace(go.Scatter(
+        x=[last["date"]], y=[last["value"]], mode="markers",
+        marker=dict(color=color, size=5), hoverinfo="skip",
+    ))
+    fig.update_layout(
+        height=height, margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False),
+    )
+    return fig
+
+
+def render_kpi(col, name, spark_months=36):
+    snap = SNAP[name]
+    meta = SERIES_META[name]
+    with col:
+        st.markdown(
+            f"""
+            <div class="kpi">
+              <div class="kpi-head">
+                <span class="kpi-label">{meta['label']}</span>
+                <span class="kpi-tag">{meta['tag']}</span>
+              </div>
+              <div class="kpi-value">{fmt_value(name, snap['value']) if snap else '—'}</div>
+              <div class="kpi-delta">
+                <span class="{delta_class(name, snap['mom']) if snap else 'flat'}">
+                  {fmt_delta(name, snap['mom']) if snap else '—'} MoM</span>
+                <span class="muted"> &nbsp;·&nbsp; {fmt_delta(name, snap['yoy']) if snap else '—'} YoY</span>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if snap is not None:
+            recent = snap["history"].tail(spark_months)
+            st.plotly_chart(
+                sparkline(recent, ACCENT),
+                width="stretch",
+                config={"displayModeBar": False, "staticPlot": True},
+            )
+
+
+# --------------------------------------------------------------------------
+# Narrative
+# --------------------------------------------------------------------------
+def month_label(ts):
+    return ts.strftime("%B %Y")
+
+
+def build_summary():
+    u3 = SNAP["unemployment_rate_national"]
+    pay = SNAP["nonfarm_payrolls"]
+    part = SNAP["labor_force_participation"]
+    jo = SNAP["job_openings"]
+    parts = []
+
+    if abs(u3["mom"]) < 0.05:
+        move = "was unchanged at"
+    else:
+        move = ("rose" if u3["mom"] > 0 else "fell") + f" {abs(u3['mom']):.1f} pp to"
+    sentence = f"The unemployment rate {move} <b>{u3['value']:.1f}%</b> in {month_label(u3['date'])}"
+    if pd.notna(u3["yoy"]) and abs(u3["yoy"]) >= 0.05:
+        direction = "below" if u3["yoy"] < 0 else "above"
+        sentence += f", {abs(u3['yoy']):.1f} pp {direction} a year earlier"
+    parts.append(sentence + ".")
+
+    mom_jobs = pay["history"]["value"].diff().dropna()
+    avg12 = mom_jobs.tail(12).mean()
+    if abs(pay["mom"] - avg12) < 15:
+        vs = "in line with"
+    else:
+        vs = "above" if pay["mom"] > avg12 else "below"
+    parts.append(
+        f"Employers added <b>{pay['mom'] * 1000:,.0f}</b> jobs, {vs} the "
+        f"{avg12 * 1000:,.0f}/month pace of the past year."
+    )
+
+    parts.append(
+        f"Labor force participation is <b>{part['value']:.1f}%</b> "
+        f"({part['mom']:+.1f} pp MoM), and job openings stand at "
+        f"<b>{jo['value'] / 1000:.1f}M</b> as of {month_label(jo['date'])}."
+    )
+    return " ".join(parts)
+
+
+# --------------------------------------------------------------------------
+# Header
+# --------------------------------------------------------------------------
+st.markdown(
+    f"""
+    <div class="eyebrow">U.S. economic indicators</div>
+    <div class="hero-title">The Labor Market
+        <span class="hero-period">{month_label(LATEST_PERIOD)}</span></div>
+    <div class="hero-sub">Employment, unemployment, participation, wages and job
+        turnover — the monthly picture from the Bureau of Labor Statistics,
+        with a state cross-section from the Census Bureau.</div>
+    """,
+    unsafe_allow_html=True,
 )
 
-with dashboard:
+st.markdown(
+    f'<div class="summary"><div class="lede">What changed this month</div>'
+    f'<p>{build_summary()}</p></div>',
+    unsafe_allow_html=True,
+)
+
+tab_overview, tab_detail, tab_states, tab_demo = st.tabs(
+    ["Overview", "Labor supply & churn", "States", "Demographics"]
+)
+
+# ==========================================================================
+# OVERVIEW
+# ==========================================================================
+with tab_overview:
+    st.markdown('<div class="section-h">Headline indicators</div>', unsafe_allow_html=True)
     st.markdown(
-        f"""
-        <div class="hero-kicker">U.S. economic indicators</div>
-        <div class="hero-title"><span class="hero-period">{latest_period}</span>Labor Market KPIs</div>
-        <div class="hero-copy">
-            Explore the latest trends in employment, unemployment,
-            wages, and state labor-force conditions.
-        </div>
-        """,
+        f'<div class="section-note">Latest reading, month-over-month and '
+        f'year-over-year change. Sparklines show the last three years.</div>',
         unsafe_allow_html=True,
     )
 
-    unemployment, unemployment_delta, _ = series_snapshot(
-        bls_df, "unemployment_rate_national"
-    )
-    payrolls, payrolls_delta, _ = series_snapshot(
-        bls_df, "nonfarm_payrolls"
-    )
-    earnings, earnings_delta, _ = series_snapshot(
-        bls_df, "avg_hourly_earnings"
-    )
-    earnings_change_pct = (
-        earnings_delta / (earnings - earnings_delta) * 100
-        if earnings is not None and earnings_delta is not None
-        else None
-    )
+    row1 = st.columns(3, gap="medium")
+    for col, name in zip(row1, ["unemployment_rate_national", "nonfarm_payrolls", "labor_force_participation"]):
+        render_kpi(col, name)
+    row2 = st.columns(3, gap="medium")
+    for col, name in zip(row2, ["u6_underemployment", "job_openings", "avg_hourly_earnings"]):
+        render_kpi(col, name)
 
-    kpi_columns = st.columns(3, gap="medium")
-    with kpi_columns[0]:
-        render_kpi(
-            "◎",
-            "Unemployment rate",
-            f"{unemployment:.1f}%" if unemployment is not None else "—",
-            (
-                f"{unemployment_delta:+.1f} pp vs last month"
-                if unemployment_delta is not None
-                else "Latest national reading"
-            ),
-        )
-    with kpi_columns[1]:
-        render_kpi(
-            "↗",
-            "Total nonfarm payrolls",
-            f"{payrolls / 1000:.1f}M" if payrolls is not None else "—",
-            (
-                f"{payrolls_delta:+,.0f}K vs last month"
-                if payrolls_delta is not None
-                else "Latest national reading"
-            ),
-        )
-    with kpi_columns[2]:
-        render_kpi(
-            "$",
-            "Average hourly earnings",
-            f"${earnings:.2f}" if earnings is not None else "—",
-            (
-                f"{earnings_change_pct:+.1f}% vs last month"
-                if earnings_change_pct is not None
-                else "Latest national reading"
-            ),
-        )
-    national_charts = [
-        (
-            "unemployment_rate_national",
-            "National Unemployment Rate",
-            "Unemployment Rate (%)",
-            "#5A5AEE",
+    st.markdown('<div class="section-h">Unemployment</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-note">U-3 is the headline rate; U-6 adds '
+        'discouraged, marginally-attached and involuntary part-time workers.</div>',
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(
+        line_panel(
+            [("unemployment_rate_national", "U-3 headline", SERIES[0]),
+             ("u6_underemployment", "U-6 underemployment", SERIES[1])],
+            "Unemployment and underemployment rates",
+            lambda v: f"{v:.1f}%", hover_unit="%",
         ),
-        (
-            "nonfarm_payrolls",
-            "Total Nonfarm Payroll Employment",
-            "Employment (thousands)",
-            "#668294",
+        width="stretch",
+        config={"displayModeBar": False, "responsive": True},
+    )
+
+    st.markdown('<div class="section-h">Payroll employment</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-note">Monthly change in total nonfarm payrolls '
+        '(establishment survey). Bars above zero are net hiring.</div>',
+        unsafe_allow_html=True,
+    )
+    pay = SNAP["nonfarm_payrolls"]["history"].copy()
+    pay["change"] = pay["value"].diff() * 1000
+    recent = pay.dropna(subset=["change"]).tail(36)
+    bar = go.Figure(go.Bar(
+        x=recent["date"], y=recent["change"],
+        marker_color=[ACCENT if v >= 0 else SERIES[1] for v in recent["change"]],
+        hovertemplate="%{x|%b %Y}: %{y:+,.0f} jobs<extra></extra>",
+    ))
+    bar.update_layout(title="Monthly change in nonfarm payrolls — last 3 years")
+    theme(bar, height=340, legend=False)
+    bar.update_yaxes(ticksuffix="", zeroline=True, zerolinecolor=HAIRLINE)
+    st.plotly_chart(bar, width="stretch", config={"displayModeBar": False})
+
+# ==========================================================================
+# LABOR SUPPLY & CHURN
+# ==========================================================================
+with tab_detail:
+    st.markdown('<div class="section-h">Who is working</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-note">Participation counts everyone 16+ in the labor '
+        'force; the prime-age employment rate (25–54) strips out retirement and '
+        'schooling effects and is the cleaner read on labor-market slack.</div>',
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(
+        line_panel(
+            [("labor_force_participation", "Participation (16+)", SERIES[0]),
+             ("employment_population_ratio", "Employment-pop. ratio (16+)", SERIES[1]),
+             ("prime_age_epop", "Prime-age employment (25–54)", SERIES[2])],
+            "Labor force participation and employment rates",
+            lambda v: f"{v:.1f}%", hover_unit="%",
         ),
-        (
-            "avg_hourly_earnings",
-            "Average Hourly Earnings",
-            "U.S. Dollars per Hour",
-            "#B07D4A",
-        ),
-    ]
+        width="stretch",
+        config={"displayModeBar": False},
+    )
 
-    chart_columns = st.columns(3, gap="medium")
-    for column, (series_name, title, y_label, line_color) in zip(
-        chart_columns, national_charts
-    ):
-        with column:
-            plot_df = bls_df[bls_df["series_name"] == series_name]
-            if plot_df.empty:
-                st.warning(f"No data available for {title}.")
-                continue
-
-            fig = px.line(
-                plot_df,
-                x="date",
-                y="value",
-                title=title,
-                labels={"value": y_label, "date": ""},
-            )
-            fig.update_traces(
-                line={"color": line_color, "width": 3},
-                hovertemplate=f"%{{x|%B %Y}}<br>{y_label}: %{{y:,.2f}}<extra></extra>"
-            )
-            fig.update_layout(
-                height=360,
-                margin={"l": 40, "r": 15, "t": 55, "b": 35},
-                title_font_size=16,
-            )
-            apply_chart_theme(fig)
-            st.plotly_chart(
-                fig,
-                width="stretch",
-                config={"displayModeBar": False, "responsive": True},
-            )
-
-    st.divider()
-
-    state_series = [s for s in bls_df["series_name"].unique() if s.startswith("unemployment_rate_")
-                     and s != "unemployment_rate_national"]
-    state_df = bls_df[bls_df["series_name"].isin(state_series)]
-
-    if not state_df.empty:
-        latest_state_df = (
-            state_df.dropna(subset=["state_fips", "state_name", "value"])
-            .sort_values("date")
-            .groupby("state_fips", as_index=False)
-            .tail(1)
-        )
-        latest_state_df["state_abbr"] = latest_state_df["state_fips"].map(
-            STATE_ABBREVIATIONS_BY_FIPS
-        )
-
-        latest_period = latest_state_df["date"].max().strftime("%B %Y")
-        color_range = (
-            latest_state_df["value"].min(),
-            latest_state_df["value"].max(),
-        )
-        fig = px.choropleth(
-            latest_state_df,
-            locations="state_abbr",
-            locationmode="USA-states",
-            color="value",
-            color_continuous_scale=STATE_COLOR_SCALE,
-            range_color=color_range,
-            scope="usa",
-            hover_name="state_name",
-            hover_data={
-                "state_abbr": False,
-                "value": ":.1f",
-                "date": "|%B %Y",
-            },
-            labels={"value": "Unemployment Rate (%)", "date": "Period"},
-            title=f"State Unemployment Rates — Latest Available ({latest_period})",
-        )
-        fig.update_traces(
-            marker_line_color=COLORS["surface"],
-            marker_line_width=1.5,
-            hovertemplate="<b>%{hovertext}</b><br>%{z:.1f}%<extra></extra>",
-            selector={"type": "choropleth"},
-        )
-
-        state_labels = latest_state_df[latest_state_df["state_fips"] != "72"]
-        fig.add_trace(
-            go.Scattergeo(
-                geo="geo",
-                locations=state_labels["state_abbr"],
-                locationmode="USA-states",
-                text=state_labels["state_abbr"],
-                mode="text",
-                textfont={"size": 10, "color": COLORS["navy"]},
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
-
-        puerto_rico = latest_state_df[latest_state_df["state_fips"] == "72"]
-        if not puerto_rico.empty:
-            puerto_rico_rate = puerto_rico.iloc[0]["value"]
-            color_span = color_range[1] - color_range[0]
-            color_position = (
-                (puerto_rico_rate - color_range[0]) / color_span
-                if color_span
-                else 0.5
-            )
-            puerto_rico_color = sample_colorscale(
-                STATE_COLOR_SCALE, [color_position]
-            )[0]
-            puerto_rico_lon = [
-                -67.27, -67.17, -66.74, -66.36, -65.90, -65.63,
-                -65.65, -65.87, -66.30, -66.72, -67.02, -67.21, -67.27,
-            ]
-            puerto_rico_lat = [
-                18.36, 18.49, 18.51, 18.47, 18.44, 18.36,
-                18.18, 18.03, 17.96, 17.98, 18.06, 18.18, 18.36,
-            ]
-            fig.add_trace(
-                go.Scattergeo(
-                    geo="geo2",
-                    lat=puerto_rico_lat,
-                    lon=puerto_rico_lon,
-                    mode="lines",
-                    fill="toself",
-                    fillcolor=puerto_rico_color,
-                    line={"color": COLORS["surface"], "width": 1.5},
-                    text=[f"Puerto Rico<br>{puerto_rico_rate:.1f}%"]
-                    * len(puerto_rico_lon),
-                    hovertemplate="%{text}<extra></extra>",
-                    showlegend=False,
-                )
-            )
-            fig.add_trace(
-                go.Scattergeo(
-                    geo="geo2",
-                    lat=[18.23],
-                    lon=[-66.45],
-                    mode="text",
-                    text=["PR"],
-                    textfont={"size": 10, "color": COLORS["navy"]},
-                    hoverinfo="skip",
-                    showlegend=False,
-                )
-            )
-
-        fig.update_layout(
-            height=620,
-            dragmode=False,
-            uirevision="fixed-state-map",
-            margin={"l": 0, "r": 0, "t": 90, "b": 0},
-            paper_bgcolor=COLORS["surface"],
-            font={"color": COLORS["navy"]},
-            title={"x": 0.5, "xanchor": "center"},
-            title_font={"color": COLORS["navy"], "size": 18},
-            coloraxis_colorbar={
-                "title": "",
-                "orientation": "h",
-                "x": 0.02,
-                "xanchor": "left",
-                "y": 1.04,
-                "yanchor": "bottom",
-                "len": 0.32,
-                "thickness": 14,
-                "ticksuffix": "%",
-                "tickfont": {"color": COLORS["navy"]},
-            },
-            geo2={
-                "domain": {"x": [0.72, 0.90], "y": [0.04, 0.25]},
-                "projection": {"type": "mercator", "scale": 55},
-                "center": {"lat": 18.2208, "lon": -66.5901},
-                "showland": False,
-                "showocean": True,
-                "oceancolor": COLORS["surface"],
-                "showcountries": False,
-                "showframe": True,
-                "framecolor": COLORS["blue"],
-            },
-        )
-        fig.update_geos(
-            bgcolor=COLORS["surface"],
-            lakecolor=COLORS["sky"],
-            coastlinecolor=COLORS["blue"],
-        )
-        if not puerto_rico.empty:
-            fig.add_annotation(
-                x=0.81,
-                y=0.27,
-                xref="paper",
-                yref="paper",
-                text=f"<b>Puerto Rico</b> · {puerto_rico_rate:.1f}%",
-                showarrow=False,
-                font={"size": 11, "color": COLORS["navy"]},
-            )
-
+    c1, c2 = st.columns(2, gap="medium")
+    with c1:
+        st.markdown('<div class="section-h">Wages</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-note">Average hourly earnings, total private.</div>',
+                    unsafe_allow_html=True)
         st.plotly_chart(
-            fig,
-            width="stretch",
-            config={
-                "scrollZoom": False,
-                "displayModeBar": False,
-                "doubleClick": False,
-            },
+            line_panel(
+                [("avg_hourly_earnings", "Avg hourly earnings", SERIES[0])],
+                "Average hourly earnings", lambda v: f"${v:.2f}", hover_unit="",
+                height=320, rec_label=False,
+            ),
+            width="stretch", config={"displayModeBar": False},
         )
-    else:
-        st.info("No state-level series found. Add more state series IDs in etl/fetch_bls.py.")
+    with c2:
+        st.markdown('<div class="section-h">Hours</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-note">Average weekly hours — an early '
+                    'signal; firms cut hours before headcount.</div>',
+                    unsafe_allow_html=True)
+        st.plotly_chart(
+            line_panel(
+                [("avg_weekly_hours", "Avg weekly hours", SERIES[2])],
+                "Average weekly hours", lambda v: f"{v:.1f}", hover_unit=" hrs",
+                height=320, rec_label=False,
+            ),
+            width="stretch", config={"displayModeBar": False},
+        )
 
-    st.divider()
+    st.markdown('<div class="section-h">Job openings and quits</div>', unsafe_allow_html=True)
     st.markdown(
-        f'<div style="font-size:18px;font-weight:600;color:{COLORS["navy"]};">'
-        "State Demographics</div>",
+        '<div class="section-note">From JOLTS (one month behind the household '
+        'and payroll data). A falling quits rate means workers are less '
+        'confident about switching jobs.</div>',
+        unsafe_allow_html=True,
+    )
+    d1, d2 = st.columns(2, gap="medium")
+    with d1:
+        st.plotly_chart(
+            line_panel(
+                [("job_openings", "Job openings", SERIES[0])],
+                "Job openings (thousands)", lambda v: f"{v/1000:.1f}M", hover_unit="K",
+                height=320, rec_label=False,
+            ),
+            width="stretch", config={"displayModeBar": False},
+        )
+    with d2:
+        st.plotly_chart(
+            line_panel(
+                [("quits_rate", "Quits rate", SERIES[1])],
+                "Quits rate (% of employment)", lambda v: f"{v:.1f}%", hover_unit="%",
+                height=320, rec_label=False,
+            ),
+            width="stretch", config={"displayModeBar": False},
+        )
+
+# ==========================================================================
+# STATES
+# ==========================================================================
+with tab_states:
+    latest_state = (
+        state_df.dropna(subset=["state_fips", "state_name", "value"])
+        .sort_values("date")
+        .groupby("state_fips", as_index=False)
+        .tail(1)
+        .copy()
+    )
+    latest_state["abbr"] = latest_state["state_fips"].map(STATE_ABBR_BY_FIPS)
+    state_period = latest_state["date"].max()
+    national_now = SNAP["unemployment_rate_national"]["value"]
+    latest_state["gap"] = latest_state["value"] - national_now
+    span = max(latest_state["gap"].abs().max(), 0.1)
+
+    st.markdown('<div class="section-h">State unemployment vs the national rate</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="section-note">Deviation from the national U-3 rate of '
+        f'{national_now:.1f}%. Blue states are running below the national rate, '
+        f'orange above. State figures lag the national release — latest available '
+        f'is {month_label(state_period)}.</div>',
         unsafe_allow_html=True,
     )
 
-    census_table = (
-        census_df.drop(columns=["state_fips"])
-        .rename(columns={
-            "state_name": "State",
-            "labor_force": "Labor Force",
-            "unemployed": "Unemployed",
-            "bachelors_degree": "Bachelor's Degree",
-            "total_population": "Total Population",
-            "unemployment_rate_pct": "Unemployment Rate (%)",
-            "bachelors_rate_pct": "Bachelor's Degree Rate (%)",
-        })
-        .sort_values("State")
+    choro = go.Figure(go.Choropleth(
+        locations=latest_state["abbr"], locationmode="USA-states",
+        z=latest_state["gap"], zmin=-span, zmax=span,
+        colorscale=DIVERGING, marker_line_color=SURFACE, marker_line_width=1,
+        colorbar=dict(title=dict(text="Δ pp", side="right"), thickness=12,
+                      len=0.6, x=1.0, tickfont=dict(color=INK_MUTED)),
+        customdata=np.stack([latest_state["state_name"], latest_state["value"]], axis=-1),
+        hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]:.1f}%  "
+                      "(%{z:+.1f} pp vs U.S.)<extra></extra>",
+    ))
+    choro.update_layout(
+        height=460, geo=dict(scope="usa", bgcolor=SURFACE, lakecolor=SURFACE),
+        margin=dict(l=0, r=0, t=10, b=0), paper_bgcolor=SURFACE,
+        font=dict(color=INK_MUTED, family=FONT_STACK),
+    )
+    st.plotly_chart(choro, width="stretch",
+                    config={"displayModeBar": False, "scrollZoom": False})
+
+    st.markdown('<div class="section-h">Ranked — highest and lowest</div>',
+                unsafe_allow_html=True)
+    ranked = latest_state.sort_values("value")
+    ends = pd.concat([ranked.head(10), ranked.tail(10)])
+    rank_fig = go.Figure(go.Bar(
+        x=ends["value"], y=ends["state_name"], orientation="h",
+        marker_color=[SERIES[0] if g <= 0 else SERIES[1] for g in ends["gap"]],
+        hovertemplate="%{y}: %{x:.1f}%<extra></extra>",
+    ))
+    rank_fig.add_vline(x=national_now, line_color=INK_MUTED, line_dash="dot",
+                       annotation_text=f"U.S. {national_now:.1f}%",
+                       annotation_font_color=INK_MUTED)
+    rank_fig.update_layout(title="Unemployment rate — 10 lowest and 10 highest states")
+    theme(rank_fig, height=560, legend=False)
+    rank_fig.update_layout(margin=dict(l=110, r=40, t=52, b=44), bargap=0.35)
+    rank_fig.update_yaxes(autorange="reversed")
+    rank_fig.update_xaxes(ticksuffix="%")
+    st.plotly_chart(rank_fig, width="stretch", config={"displayModeBar": False})
+
+    st.markdown('<div class="section-h">All states</div>', unsafe_allow_html=True)
+    table = (
+        latest_state[["state_name", "value", "gap"]]
+        .rename(columns={"state_name": "State", "value": "Unemployment rate (%)",
+                         "gap": "vs U.S. (pp)"})
+        .sort_values("Unemployment rate (%)")
+        .reset_index(drop=True)
     )
     st.dataframe(
-        census_table,
-        width="stretch",
-        height=600,
-        hide_index=True,
+        table, width="stretch", hide_index=True, height=440,
         column_config={
-            "State": st.column_config.TextColumn(alignment="center"),
-            "Labor Force": st.column_config.NumberColumn(alignment="center"),
-            "Unemployed": st.column_config.NumberColumn(alignment="center"),
-            "Bachelor's Degree": st.column_config.NumberColumn(alignment="center"),
-            "Total Population": st.column_config.NumberColumn(alignment="center"),
-            "Unemployment Rate (%)": st.column_config.NumberColumn(
-                alignment="center", format="%.2f"
-            ),
-            "Bachelor's Degree Rate (%)": st.column_config.NumberColumn(
-                alignment="center", format="%.2f"
-            ),
+            "Unemployment rate (%)": st.column_config.NumberColumn(format="%.1f"),
+            "vs U.S. (pp)": st.column_config.NumberColumn(format="%+.1f"),
         },
     )
 
-st.divider()
-st.caption(
-    "Sources: U.S. Bureau of Labor Statistics (bls.gov/developers) and "
-    "U.S. Census Bureau ACS (census.gov/data/developers)."
+# ==========================================================================
+# DEMOGRAPHICS
+# ==========================================================================
+with tab_demo:
+    st.markdown('<div class="section-h">Education and unemployment across states</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-note">Each dot is a state; size is the size of its '
+        'labor force. Source: Census Bureau American Community Survey, 2023 '
+        '1-year estimates (a different vintage and methodology from the monthly '
+        'CPS rate above).</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.caption(
+        "“Bachelor's degree” here is the count with a bachelor's as their highest "
+        "degree, as a share of total population."
+    )
+    dd = census_df.dropna(subset=["bachelors_rate_pct", "unemployment_rate_pct"]).copy()
+    x, y = dd["bachelors_rate_pct"].to_numpy(), dd["unemployment_rate_pct"].to_numpy()
+    slope, intercept = np.polyfit(x, y, 1)
+    corr = float(np.corrcoef(x, y)[0, 1])
+    xs = np.linspace(x.min(), x.max(), 50)
+
+    scatter = go.Figure()
+    scatter.add_trace(go.Scatter(
+        x=xs, y=slope * xs + intercept, mode="lines",
+        line=dict(color=INK_MUTED, width=1.5, dash="dot"),
+        name="trend", hoverinfo="skip",
+    ))
+    scatter.add_trace(go.Scatter(
+        x=dd["bachelors_rate_pct"], y=dd["unemployment_rate_pct"], mode="markers",
+        marker=dict(
+            size=dd["labor_force"], sizemode="area",
+            sizeref=2.0 * dd["labor_force"].max() / (34 ** 2), sizemin=4,
+            color=ACCENT, opacity=0.75, line=dict(color=SURFACE, width=1),
+        ),
+        text=dd["state_name"], name="states",
+        hovertemplate="<b>%{text}</b><br>Bachelor's+: %{x:.1f}%<br>"
+                      "Unemployment: %{y:.1f}%<extra></extra>",
+    ))
+    scatter.update_layout(
+        title=f"Bachelor's degree share vs unemployment (r = {corr:.2f})",
+        xaxis_title="Population with a bachelor's degree (%)",
+        yaxis_title="Unemployment rate (%)",
+    )
+    theme(scatter, height=460, legend=False)
+    scatter.update_xaxes(ticksuffix="%")
+    scatter.update_yaxes(ticksuffix="%")
+    st.plotly_chart(scatter, width="stretch", config={"displayModeBar": False})
+
+    st.markdown('<div class="section-h">State detail</div>', unsafe_allow_html=True)
+    demo_table = (
+        census_df.drop(columns=["state_fips"])
+        .rename(columns={
+            "state_name": "State", "labor_force": "Labor force",
+            "unemployed": "Unemployed", "bachelors_degree": "Bachelor's degree",
+            "total_population": "Population",
+            "unemployment_rate_pct": "Unemployment rate (%)",
+            "bachelors_rate_pct": "Bachelor's rate (%)",
+        })
+        .sort_values("State")
+        .reset_index(drop=True)
+    )
+    st.dataframe(
+        demo_table, width="stretch", hide_index=True, height=520,
+        column_config={
+            "Labor force": st.column_config.NumberColumn(format="%,d"),
+            "Unemployed": st.column_config.NumberColumn(format="%,d"),
+            "Bachelor's degree": st.column_config.NumberColumn(format="%,d"),
+            "Population": st.column_config.NumberColumn(format="%,d"),
+            "Unemployment rate (%)": st.column_config.NumberColumn(format="%.1f"),
+            "Bachelor's rate (%)": st.column_config.NumberColumn(format="%.1f"),
+        },
+    )
+
+# --------------------------------------------------------------------------
+# Footer
+# --------------------------------------------------------------------------
+jolts = SNAP["job_openings"]["date"]
+st.markdown(
+    f"""
+    <div class="foot">
+      <b>Sources.</b> U.S. Bureau of Labor Statistics — Current Population Survey
+      (CPS), Current Employment Statistics (CES) and Job Openings and Labor
+      Turnover Survey (JOLTS), via the
+      <a href="https://www.bls.gov/developers/">BLS Public Data API</a>.
+      Census Bureau American Community Survey 1-year estimates, via the
+      <a href="https://www.census.gov/data/developers.html">Census API</a>.<br>
+      <b>Currency.</b> Household and payroll series through {month_label(LATEST_PERIOD)};
+      JOLTS through {month_label(jolts)}; state unemployment through
+      {month_label(state_df['date'].max())}; ACS cross-section is 2023.
+      All BLS series are seasonally adjusted. Rebuild with the ETL scripts in
+      <code>etl/</code> to refresh.
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
