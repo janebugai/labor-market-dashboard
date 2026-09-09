@@ -26,23 +26,26 @@ DB_PATH = os.path.join(BASE_DIR, "..", "data", "labor_market.db")
 PLOTLYJS_VERSION = get_plotlyjs_version()
 
 # --------------------------------------------------------------------------
-# Design tokens
+# Design tokens — institutional research house style (sober, high-contrast,
+# restrained accent, near-monochrome data-ink)
 # --------------------------------------------------------------------------
-INK = "#1A2238"
-INK_MUTED = "#5B6B87"
+INK = "#0B1B33"          # deep navy, near-black — headings and marks
+INK_MUTED = "#5A6577"    # secondary text, axis labels
 SURFACE = "#FFFFFF"
-HAIRLINE = "rgba(26, 34, 56, 0.09)"
-GRID = "rgba(26, 34, 56, 0.07)"
+HAIRLINE = "rgba(11, 27, 51, 0.14)"
+GRID = "rgba(11, 27, 51, 0.06)"
 
-ACCENT = "#2457C5"
-SERIES = ["#2457C5", "#C9631C", "#0B8A78"]   # categorical, CVD-checked, fixed order
-POS = "#1B7A3D"
-NEG = "#B23A32"
-RECESSION_FILL = "rgba(26, 34, 56, 0.06)"
-DIVERGING = [[0.0, "#2457C5"], [0.5, "#EDEBE4"], [1.0, "#C9631C"]]
+ACCENT = "#1D4E89"       # single institutional blue, used sparingly
+SERIES = ["#1D4E89", "#9C6B2E", "#5E7A88"]   # navy · bronze · slate — CVD-safe, fixed order
+POS = "#2E6E4E"
+NEG = "#9E3730"
+RECESSION_FILL = "rgba(11, 27, 51, 0.05)"
+DIVERGING = [[0.0, "#1D4E89"], [0.5, "#EFEDE7"], [1.0, "#9C6B2E"]]
 
 RECESSIONS = [("2020-02-01", "2020-04-30", "COVID-19")]
-FONT_STACK = "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+FONT_STACK = ("Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, "
+              "sans-serif")
+SERIF_STACK = "'Source Serif 4', Georgia, 'Times New Roman', serif"
 
 # --------------------------------------------------------------------------
 # Series metadata
@@ -158,8 +161,9 @@ def theme(fig, height=380, legend=True):
         height=height,
         paper_bgcolor=SURFACE, plot_bgcolor=SURFACE,
         font=dict(color=INK_MUTED, family=FONT_STACK, size=12),
-        margin=dict(l=48, r=64, t=52, b=36),
-        title=dict(font=dict(color=INK, size=15), x=0, xanchor="left", y=0.97),
+        margin=dict(l=48, r=64, t=54, b=36),
+        title=dict(font=dict(color=INK, size=16, family=SERIF_STACK),
+                   x=0, xanchor="left", y=0.98),
         hovermode="x unified",
         hoverlabel=dict(bgcolor=INK, font_color="white", bordercolor=INK, font_size=12),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
@@ -167,7 +171,8 @@ def theme(fig, height=380, legend=True):
         showlegend=legend,
     )
     fig.update_xaxes(showgrid=False, linecolor=HAIRLINE, tickcolor=HAIRLINE,
-                     ticks="outside", tickfont=dict(color=INK_MUTED, size=11))
+                     ticks="outside", ticklen=4,
+                     tickfont=dict(color=INK_MUTED, size=11))
     fig.update_yaxes(gridcolor=GRID, zeroline=False, linecolor="rgba(0,0,0,0)",
                      ticks="", tickfont=dict(color=INK_MUTED, size=11))
     return fig
@@ -248,7 +253,7 @@ def payroll_change_chart():
     recent = pay.dropna(subset=["change"]).tail(36)
     fig = go.Figure(go.Bar(
         x=recent["date"], y=recent["change"],
-        marker_color=[ACCENT if v >= 0 else SERIES[1] for v in recent["change"]],
+        marker_color=[ACCENT if v >= 0 else NEG for v in recent["change"]],
         hovertemplate="%{x|%b %Y}: %{y:+,.0f} jobs<extra></extra>",
     ))
     fig.update_layout(title="Monthly change in nonfarm payrolls — last 3 years")
@@ -267,17 +272,25 @@ def latest_state_frame():
 
 def choropleth_chart(states):
     span = max(states["gap"].abs().max(), 0.1)
+    # Pre-format the hover label in Python — Plotly's hovertemplate mini-parser
+    # doesn't honour the d3 "+" sign flag, so the signed gap is built here.
+    hover = [
+        f"<b>{name}</b><br>{val:.2f}%  ({gap:+.2f} pp vs U.S.)"
+        for name, val, gap in zip(states["state_name"], states["value"], states["gap"])
+    ]
     fig = go.Figure(go.Choropleth(
         locations=states["abbr"], locationmode="USA-states",
         z=states["gap"], zmin=-span, zmax=span, colorscale=DIVERGING,
         marker_line_color=SURFACE, marker_line_width=1,
         colorbar=dict(title=dict(text="Δ pp", side="right"), thickness=12,
                       len=0.6, x=1.0, tickfont=dict(color=INK_MUTED)),
-        customdata=np.stack([states["state_name"], states["value"]], axis=-1),
-        hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]:.1f}%  "
-                      "(%{z:+.1f} pp vs U.S.)<extra></extra>",
+        customdata=hover,
+        hovertemplate="%{customdata}<extra></extra>",
     ))
-    fig.update_layout(height=460,
+    # Fixed pixel size + autosize off: the map is drawn once at these
+    # dimensions and never re-fits. On narrow screens the card scrolls
+    # horizontally rather than the projection being recomputed.
+    fig.update_layout(width=1040, height=480, autosize=False,
                       geo=dict(scope="usa", bgcolor=SURFACE, lakecolor=SURFACE),
                       margin=dict(l=0, r=0, t=10, b=0), paper_bgcolor=SURFACE,
                       font=dict(color=INK_MUTED, family=FONT_STACK))
@@ -368,13 +381,18 @@ def build_summary():
 # HTML assembly
 # --------------------------------------------------------------------------
 _PLOT_CONFIG = {"displayModeBar": False, "responsive": True}
+# The choropleth is pinned to a fixed size (see choropleth_chart): a geo subplot
+# re-fits its projection on every window-resize event and the map creeps smaller
+# each time, so it opts out of the responsive handler entirely.
+_PLOT_CONFIG_FIXED = {"displayModeBar": False, "responsive": False}
 
 
-def fig_div(fig, div_id):
+def fig_div(fig, div_id, responsive=True):
     height = fig.layout.height or 380
+    width = "100%" if responsive else f"{int(fig.layout.width)}px"
     return pio.to_html(fig, include_plotlyjs=False, full_html=False, div_id=div_id,
-                       default_width="100%", default_height=f"{height}px",
-                       config=_PLOT_CONFIG)
+                       default_width=width, default_height=f"{height}px",
+                       config=_PLOT_CONFIG if responsive else _PLOT_CONFIG_FIXED)
 
 
 def kpi_cards():
@@ -458,7 +476,7 @@ def build_context():
         chart_quits=fig_div(line_panel(
             [("quits_rate", "Quits rate", SERIES[1])],
             "Quits rate (% of employment)", lambda v: f"{v:.1f}%", "%", height=320, rec_label=False), "c-quit"),
-        chart_choropleth=fig_div(choropleth_chart(states), "c-map"),
+        chart_choropleth=fig_div(choropleth_chart(states), "c-map", responsive=False),
         chart_ranked=fig_div(ranked_states_chart(states), "c-rank"),
         chart_scatter=fig_div(scatter_chart(), "c-scatter"),
         national_now=f"{national_now:.1f}",
@@ -473,7 +491,7 @@ def build_context():
 # --------------------------------------------------------------------------
 # App
 # --------------------------------------------------------------------------
-app = FastAPI(title="Labor Market KPIs")
+app = FastAPI(title="Labor Market Monitor")
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
