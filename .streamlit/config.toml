@@ -1,0 +1,13 @@
+# Streamlit runtime config, applied on every launch (local and on Render).
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+# The app paints its own light palette in CSS; pin the surrounding chrome to
+# light so it doesn't clash in a viewer's dark mode.
+base = "light"

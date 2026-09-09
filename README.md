@@ -106,15 +106,49 @@ labor-market-dashboard/
 │   └── app.py             # Streamlit dashboard
 ├── notebooks/
 │   └── exploration.ipynb  # Exploratory analysis
+├── .streamlit/
+│   └── config.toml        # Streamlit runtime config
+├── render.yaml            # Render Blueprint
+├── .python-version        # pins CPython for Render
 ├── requirements.txt
 └── README.md
 ```
 
+## Deploy to Render
+
+The repo includes [`render.yaml`](render.yaml), a Blueprint that provisions a
+free web service.
+
+1. Push to GitHub.
+2. In Render: **New +** → **Blueprint** → select this repo → **Apply**.
+3. That's it — no environment variables to set. The dashboard reads the
+   committed `data/labor_market.db`, so it never calls the BLS or Census APIs
+   at runtime.
+
+What the Blueprint runs:
+
+| Step  | Command |
+|-------|---------|
+| Build | `pip install -r requirements.txt` |
+| Start | `streamlit run dashboard/app.py --server.port $PORT --server.address 0.0.0.0` |
+
+Notes:
+
+- **Python version.** `.python-version` and `PYTHON_VERSION` pin CPython
+  3.11.9 so the pinned wheels resolve without a from-source build.
+- **Health check** is `/_stcore/health` (Streamlit's own endpoint).
+- **Refreshing the data on deploy.** The committed database is used as-is. To
+  rebuild it on every deploy, add `BLS_API_KEY` and `CENSUS_API_KEY` in the
+  Render dashboard and change the build command to also run the three ETL
+  scripts (see the comment in `render.yaml`).
+- Free instances spin down after ~15 minutes idle; the first request after
+  that takes ~30–60s to wake.
+
 ## Roadmap / stretch goals
 
 - [x] Annotate recessions on the timelines (NBER shading)
+- [x] One-click deploy (Render Blueprint)
 - [ ] Add a forecasting model (Prophet / ARIMA) for the next-month unemployment rate
-- [ ] Deploy to Streamlit Community Cloud
 - [ ] Add a caching layer to respect API rate limits on refresh
 
 ## Data sources
