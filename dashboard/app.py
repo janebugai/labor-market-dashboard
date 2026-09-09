@@ -109,9 +109,11 @@ st.markdown(
 
     .kpi {{
         background: {SURFACE}; border: 1px solid {HAIRLINE}; border-radius: 14px;
-        padding: 1rem 1.1rem 0.5rem; height: 100%;
+        padding: 1rem 1.1rem 0.9rem; height: 100%;
     }}
     .kpi-head {{ min-height: 2.4rem; }}
+    .kpi-spark {{ margin-top: 0.75rem; height: 44px; }}
+    .kpi-spark svg {{ height: 44px; overflow: visible; }}
     .kpi-label {{ display: block; font-size: 0.82rem; font-weight: 700;
         color: {INK}; line-height: 1.25; }}
     .kpi-tag {{ display: block; font-size: 0.64rem; font-weight: 600;
@@ -132,7 +134,6 @@ st.markdown(
         border-radius: 14px; padding: 0.4rem 0.6rem; overflow: hidden;
     }}
     [data-testid="stDataFrame"] {{ border: 1px solid {HAIRLINE}; border-radius: 12px; }}
-    .kpi [data-testid="stPlotlyChart"] {{ border: none; padding: 0; background: transparent; }}
 
     button[data-baseweb="tab"] {{ font-weight: 600; color: {INK_MUTED}; }}
     button[data-baseweb="tab"][aria-selected="true"] {{ color: {INK}; }}
@@ -325,27 +326,37 @@ def line_panel(specs, title, y_fmt, hover_unit="", height=380, recessions=True, 
     return fig
 
 
-def sparkline(d, color, height=52):
-    fig = go.Figure(go.Scatter(
-        x=d["date"], y=d["value"], mode="lines",
-        line=dict(color=color, width=1.8), hoverinfo="skip",
-    ))
-    last = d.iloc[-1]
-    fig.add_trace(go.Scatter(
-        x=[last["date"]], y=[last["value"]], mode="markers",
-        marker=dict(color=color, size=5), hoverinfo="skip",
-    ))
-    fig.update_layout(
-        height=height, margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False),
+def sparkline_svg(values, color=ACCENT, width=320, height=44, pad=5):
+    vs = [float(v) for v in values if pd.notna(v)]
+    if len(vs) < 2:
+        return ""
+    lo, hi = min(vs), max(vs)
+    rng = (hi - lo) or 1.0
+    n = len(vs)
+    xs = [pad + i * (width - 2 * pad) / (n - 1) for i in range(n)]
+    ys = [height - pad - (v - lo) / rng * (height - 2 * pad) for v in vs]
+    pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+    return (
+        f'<svg viewBox="0 0 {width} {height}" width="100%" preserveAspectRatio="none" '
+        f'style="display:block">'
+        f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="1.5" '
+        f'stroke-linejoin="round" vector-effect="non-scaling-stroke"/>'
+        f'<circle cx="{xs[-1]:.1f}" cy="{ys[-1]:.1f}" r="2.6" fill="{color}" '
+        f'vector-effect="non-scaling-stroke"/></svg>'
     )
-    return fig
 
 
 def render_kpi(col, name, spark_months=36):
     snap = SNAP[name]
     meta = SERIES_META[name]
+    if snap is None:
+        spark, dc, mom, yoy, val = "", "flat", "—", "—", "—"
+    else:
+        spark = sparkline_svg(snap["history"]["value"].tail(spark_months))
+        dc = delta_class(name, snap["mom"])
+        mom = fmt_delta(name, snap["mom"])
+        yoy = fmt_delta(name, snap["yoy"])
+        val = fmt_value(name, snap["value"])
     with col:
         st.markdown(
             f"""
@@ -354,23 +365,16 @@ def render_kpi(col, name, spark_months=36):
                 <span class="kpi-label">{meta['label']}</span>
                 <span class="kpi-tag">{meta['tag']}</span>
               </div>
-              <div class="kpi-value">{fmt_value(name, snap['value']) if snap else '—'}</div>
+              <div class="kpi-value">{val}</div>
               <div class="kpi-delta">
-                <span class="{delta_class(name, snap['mom']) if snap else 'flat'}">
-                  {fmt_delta(name, snap['mom']) if snap else '—'} MoM</span>
-                <span class="muted"> &nbsp;·&nbsp; {fmt_delta(name, snap['yoy']) if snap else '—'} YoY</span>
+                <span class="{dc}">{mom} MoM</span>
+                <span class="muted"> &nbsp;·&nbsp; {yoy} YoY</span>
               </div>
+              <div class="kpi-spark">{spark}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        if snap is not None:
-            recent = snap["history"].tail(spark_months)
-            st.plotly_chart(
-                sparkline(recent, ACCENT),
-                width="stretch",
-                config={"displayModeBar": False, "staticPlot": True},
-            )
 
 
 # --------------------------------------------------------------------------
