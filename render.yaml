@@ -1,0 +1,18 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy: push to GitHub, then in Render: New + -> Blueprint -> pick this repo -> Apply.
+services:
+  - type: web
+    name: labor-market-dashboard
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn dashboard.app:app -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:$PORT --timeout 120
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+
+# The dashboard reads the committed data/labor_market.db, so no API keys are
+# needed at runtime. To rebuild the database on every deploy instead, add
+# BLS_API_KEY and CENSUS_API_KEY (sync: false) above and change buildCommand to:
+#   pip install -r requirements.txt && python etl/fetch_bls.py && python etl/fetch_census.py && python etl/transform.py

@@ -15,13 +15,14 @@ API ingestion → transformation → storage → interactive visualization.
 
 ```
 [BLS API]   ─┐
-             ├─→ [ETL scripts] ─→ [SQLite] ─→ [Streamlit dashboard]
+             ├─→ [ETL scripts] ─→ [SQLite] ─→ [FastAPI + Plotly dashboard]
 [Census API] ─┘
 ```
 
 ## What's in the dashboard
 
-A four-tab Streamlit app (`dashboard/app.py`):
+A four-tab dashboard served by FastAPI (`dashboard/app.py`) — one server-rendered
+page with Plotly charts, no client framework:
 
 | Tab | Content |
 |-----|---------|
@@ -61,11 +62,11 @@ API keys — keys are only needed to refresh it.
    pip install -r requirements.txt
    ```
 
-2. **To view the dashboard**, just launch it — the demo database is included:
+2. **To view the dashboard**, just launch it — the database is committed:
    ```bash
-   streamlit run dashboard/app.py
+   uvicorn dashboard.app:app --reload
    ```
-   Open http://localhost:8501.
+   Open http://localhost:8000. (`GET /health` returns a JSON status.)
 
 3. **To refresh the data**, get free API keys and re-run the ETL:
    - BLS: https://data.bls.gov/registrationEngine/ (raises limits from
@@ -103,18 +104,45 @@ labor-market-dashboard/
 │   ├── labor_market.db    # SQLite database (committed; regenerate with the ETL)
 │   └── *.json             # Raw API responses (gitignored)
 ├── dashboard/
-│   └── app.py             # Streamlit dashboard
+│   ├── app.py             # FastAPI app — builds Plotly figures, renders the page
+│   └── templates/
+│       └── index.html     # single page (CSS, tab layout)
 ├── notebooks/
 │   └── exploration.ipynb  # Exploratory analysis
+├── render.yaml            # Render Blueprint
+├── .python-version        # pins CPython for Render
 ├── requirements.txt
 └── README.md
 ```
 
+## Deploy to Render
+
+The repo includes [`render.yaml`](render.yaml), a Blueprint that provisions a
+free web service.
+
+1. Push to GitHub.
+2. In Render: **New +** → **Blueprint** → select this repo → **Apply**.
+   (Blueprint, not "Web Service" — a manually created service prefills a
+   `gunicorn app:app` command that doesn't match this layout.)
+3. No environment variables to set — the app serves the committed
+   `data/labor_market.db` and never calls the BLS or Census APIs at runtime.
+
+| Step  | Command |
+|-------|---------|
+| Build | `pip install -r requirements.txt` |
+| Start | `gunicorn dashboard.app:app -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:$PORT --timeout 120` |
+
+Health check path is `/health`. `.python-version` / `PYTHON_VERSION` pin
+CPython 3.11.9. Free instances spin down after ~15 minutes idle (first request
+after that takes ~30–60s). To rebuild the database on every deploy, add
+`BLS_API_KEY` / `CENSUS_API_KEY` and extend the build command — see the comment
+in `render.yaml`.
+
 ## Roadmap / stretch goals
 
 - [x] Annotate recessions on the timelines (NBER shading)
+- [x] One-click deploy (Render Blueprint)
 - [ ] Add a forecasting model (Prophet / ARIMA) for the next-month unemployment rate
-- [ ] Deploy to Streamlit Community Cloud
 - [ ] Add a caching layer to respect API rate limits on refresh
 
 ## Data sources
