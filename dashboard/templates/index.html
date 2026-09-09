@@ -24,30 +24,8 @@
     font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
   a { color: var(--accent); text-underline-offset: 2px; }
-
-  /* ---- Masthead ------------------------------------------------------- */
-  .masthead {
-    border-bottom: 3px double var(--rule);
-    margin-bottom: 2.25rem;
-  }
-  .masthead-inner {
-    max-width: 1180px; margin: 0 auto; padding: 1.15rem 1.5rem .9rem;
-    display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
-  }
-  .wordmark {
-    font-family: var(--serif); font-weight: 700; font-size: 1.05rem;
-    letter-spacing: .01em; color: var(--ink);
-  }
-  .wordmark .mark {
-    display: inline-block; border-left: 3px solid var(--accent);
-    padding-left: .55rem;
-  }
-  .masthead .asof {
-    font-size: .68rem; font-weight: 600; letter-spacing: .13em;
-    text-transform: uppercase; color: var(--muted); white-space: nowrap;
-  }
 
   .eyebrow {
     color: var(--accent); font-size: .7rem; font-weight: 700;
@@ -179,18 +157,10 @@
     .kpi-grid { grid-template-columns: 1fr; }
     .two-col { grid-template-columns: 1fr; }
     .tabs { gap: 1.15rem; overflow-x: auto; }
-    .masthead-inner { flex-direction: column; align-items: flex-start; gap: .35rem; }
   }
 </style>
 </head>
 <body>
-
-<header class="masthead">
-  <div class="masthead-inner">
-    <div class="wordmark"><span class="mark">Labor Market Monitor</span></div>
-    <div class="asof">As of {{ period }}</div>
-  </div>
-</header>
 
 <div class="wrap">
 
