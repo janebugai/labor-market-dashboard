@@ -110,6 +110,16 @@ st.markdown(
         line-height: 1;
         margin: 0 0 0.65rem;
     }}
+    .hero-period {{
+        color: {COLORS["gold"]};
+        font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: clamp(0.9rem, 1.8vw, 1.4rem);
+        font-weight: 700;
+        letter-spacing: 0;
+        margin-left: 0.6rem;
+        vertical-align: 0.35em;
+        white-space: nowrap;
+    }}
     .hero-copy {{
         color: {COLORS["blue"]};
         font-size: 0.9rem;
@@ -282,11 +292,16 @@ except Exception as e:
 dashboard = st.container()
 
 # --- Consolidated dashboard ---
+national_dates = bls_df.loc[bls_df["state_fips"].isna(), "date"]
+latest_period = (
+    national_dates.max().strftime("%B %Y") if not national_dates.dropna().empty else ""
+)
+
 with dashboard:
     st.markdown(
-        """
+        f"""
         <div class="hero-kicker">U.S. economic indicators</div>
-        <div class="hero-title">Labor Market</div>
+        <div class="hero-title">Labor Market<span class="hero-period">{latest_period}</span></div>
         <div class="hero-copy">
             Explore the latest trends in employment, unemployment,
             wages, and state labor-force conditions.
