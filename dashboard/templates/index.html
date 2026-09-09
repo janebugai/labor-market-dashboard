@@ -3,58 +3,98 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Labor Market KPIs</title>
+<title>Labor Market Monitor</title>
 <script src="https://cdn.plot.ly/plotly-{{ plotlyjs_version }}.min.js" charset="utf-8"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --ink: #1A2238; --muted: #5B6B87; --page: #F4F3EF; --surface: #FFFFFF;
-    --hairline: rgba(26,34,56,.09); --accent: #2457C5;
-    --pos: #1B7A3D; --neg: #B23A32;
-    --sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --ink: #0B1B33; --muted: #5A6577; --page: #FFFFFF; --surface: #FFFFFF;
+    --panel: #FAFAF9; --hairline: rgba(11,27,51,.14); --rule: rgba(11,27,51,.22);
+    --accent: #1D4E89;
+    --pos: #2E6E4E; --neg: #9E3730;
+    --sans: Inter, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --radius: 3px;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--page); color: var(--ink);
-    font: 15px/1.55 var(--sans); -webkit-font-smoothing: antialiased;
+    font: 15px/1.6 var(--sans); -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  .wrap { max-width: 1240px; margin: 0 auto; padding: 2.75rem 1.25rem 3rem; }
-  a { color: var(--accent); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+
+  /* ---- Masthead ------------------------------------------------------- */
+  .masthead {
+    border-bottom: 3px double var(--rule);
+    margin-bottom: 2.25rem;
+  }
+  .masthead-inner {
+    max-width: 1180px; margin: 0 auto; padding: 1.15rem 1.5rem .9rem;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+  }
+  .wordmark {
+    font-family: var(--serif); font-weight: 700; font-size: 1.05rem;
+    letter-spacing: .01em; color: var(--ink);
+  }
+  .wordmark .mark {
+    display: inline-block; border-left: 3px solid var(--accent);
+    padding-left: .55rem;
+  }
+  .masthead .asof {
+    font-size: .68rem; font-weight: 600; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--muted); white-space: nowrap;
+  }
 
   .eyebrow {
-    color: var(--muted); font-size: .72rem; font-weight: 700;
-    letter-spacing: .16em; text-transform: uppercase;
+    color: var(--accent); font-size: .7rem; font-weight: 700;
+    letter-spacing: .19em; text-transform: uppercase;
   }
   h1.hero {
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: clamp(1.9rem, 4.2vw, 3.1rem); font-weight: 700;
-    letter-spacing: -.03em; line-height: 1.02; margin: .35rem 0 .5rem;
-    white-space: nowrap;
+    font-family: var(--serif);
+    font-size: clamp(1.85rem, 3.6vw, 2.7rem); font-weight: 600;
+    letter-spacing: -.015em; line-height: 1.08; margin: .5rem 0 .55rem;
   }
   h1.hero .period {
-    color: var(--accent); font-family: var(--sans); font-weight: 700;
-    font-size: .34em; vertical-align: baseline; margin-left: .35em; white-space: nowrap;
+    color: var(--muted); font-family: var(--sans); font-weight: 600;
+    font-size: .36em; letter-spacing: .04em; vertical-align: middle;
+    margin-left: .6em; text-transform: uppercase;
   }
-  .hero-sub { color: var(--muted); font-size: .95rem; line-height: 1.6; max-width: 62ch; }
+  .hero-sub {
+    color: var(--muted); font-size: .95rem; line-height: 1.65; max-width: 64ch;
+  }
 
   .summary {
-    background: var(--surface); border: 1px solid var(--hairline);
-    border-radius: 14px; padding: 1.1rem 1.3rem; margin: 1.4rem 0 1.6rem;
+    background: var(--panel); border: 1px solid var(--hairline);
+    border-left: 3px solid var(--accent); border-radius: var(--radius);
+    padding: 1.15rem 1.35rem; margin: 1.6rem 0 2rem;
   }
   .summary .lede {
-    color: var(--muted); font-size: .72rem; font-weight: 700;
-    letter-spacing: .14em; text-transform: uppercase; margin-bottom: .5rem;
+    color: var(--muted); font-size: .68rem; font-weight: 700;
+    letter-spacing: .15em; text-transform: uppercase; margin-bottom: .55rem;
   }
-  .summary p { margin: 0; font-size: .95rem; line-height: 1.65; }
+  .summary p {
+    margin: 0; font-family: var(--serif); font-size: 1.02rem; line-height: 1.65;
+  }
 
-  .tabs { display: flex; gap: 1.5rem; border-bottom: 1px solid var(--hairline); margin-bottom: 1.4rem; }
+  .tabs {
+    display: flex; gap: 2rem; border-bottom: 1px solid var(--rule);
+    margin-bottom: 1.75rem;
+  }
   .tab-btn {
     background: none; border: none; border-bottom: 2px solid transparent;
-    font: 600 .95rem var(--sans); color: var(--muted);
-    padding: .55rem .1rem; cursor: pointer;
+    font: 600 .72rem var(--sans); letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted); padding: .7rem .1rem; cursor: pointer; margin-bottom: -1px;
+    white-space: nowrap;
   }
+  .tab-btn:hover { color: var(--ink); }
   .tab-btn.active { color: var(--ink); border-bottom-color: var(--accent); }
   /* Inactive panels keep full width (off-flow + hidden) so the Plotly charts
-     inside them still lay out correctly and don't need a resize on reveal. */
+     inside them lay out at the right width; each panel's charts still get a
+     one-time resize when it is first revealed (see the tab script). */
   .panel-stack { position: relative; }
   .panel {
     position: absolute; top: 0; left: 0; width: 100%;
@@ -62,63 +102,100 @@
   }
   .panel.active { position: relative; visibility: visible; height: auto; overflow: visible; }
 
-  .section-h { font-size: 1.15rem; font-weight: 700; margin: 1.6rem 0 .2rem; }
-  .section-note { color: var(--muted); font-size: .82rem; margin-bottom: .6rem; max-width: 74ch; }
+  .section-h {
+    font-family: var(--serif); font-size: 1.2rem; font-weight: 600;
+    letter-spacing: -.005em; margin: 2rem 0 .3rem; padding-top: .9rem;
+    border-top: 1px solid var(--hairline);
+  }
+  .section-h:first-child { border-top: none; padding-top: 0; margin-top: .5rem; }
+  .section-note {
+    color: var(--muted); font-size: .82rem; line-height: 1.6;
+    margin-bottom: .8rem; max-width: 76ch;
+  }
 
-  .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  .kpi-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
+    border-top: 1px solid var(--hairline); border-left: 1px solid var(--hairline);
+    border-radius: var(--radius); overflow: hidden;
+  }
   .kpi {
-    background: var(--surface); border: 1px solid var(--hairline);
-    border-radius: 14px; padding: 1rem 1.1rem .6rem;
+    background: var(--surface);
+    border-right: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline);
+    padding: 1.1rem 1.15rem .7rem;
   }
-  .kpi .k-label { font-size: .82rem; font-weight: 700; line-height: 1.25; }
+  .kpi .k-label { font-size: .8rem; font-weight: 600; line-height: 1.3; }
   .kpi .k-tag {
-    display: block; font-size: .64rem; font-weight: 600; letter-spacing: .07em;
-    text-transform: uppercase; color: var(--muted); margin-top: .15rem;
+    display: block; font-size: .62rem; font-weight: 600; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--muted); margin-top: .2rem;
   }
-  .kpi .k-value { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em; margin: .35rem 0 .15rem; line-height: 1; }
-  .kpi .k-delta { font-size: .8rem; font-weight: 600; }
+  .kpi .k-value {
+    font-family: var(--serif); font-size: 2rem; font-weight: 600;
+    letter-spacing: -.01em; margin: .45rem 0 .2rem; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi .k-delta { font-size: .78rem; font-weight: 600; font-variant-numeric: tabular-nums; }
   .kpi .k-delta .muted { color: var(--muted); font-weight: 500; }
   .pos { color: var(--pos); } .neg { color: var(--neg); } .flat { color: var(--muted); }
-  .kpi .chart { margin-top: .3rem; }
+  .kpi .chart { margin-top: .35rem; }
 
   .card {
     background: var(--surface); border: 1px solid var(--hairline);
-    border-radius: 14px; padding: .5rem .7rem; margin-bottom: .4rem; overflow: hidden;
+    border-radius: var(--radius); padding: .55rem .75rem;
+    margin-bottom: .5rem; overflow: hidden;
   }
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
   .js-plotly-plot { width: 100% !important; }
 
+  /* The choropleth is a fixed-size figure; let it keep its width and scroll
+     the card on screens too narrow to show it, rather than rescaling. */
+  .card--map { overflow-x: auto; overflow-y: hidden; text-align: center; }
+  .card--map .js-plotly-plot {
+    width: 1040px !important; max-width: 1040px; margin: 0 auto; display: inline-block;
+  }
+
   .table-wrap {
     overflow-x: auto; border: 1px solid var(--hairline);
-    border-radius: 12px; background: var(--surface); margin-top: .4rem;
+    border-radius: var(--radius); background: var(--surface); margin-top: .5rem;
   }
   table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   th, td { padding: 9px 14px; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
-  th { font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
-       color: var(--muted); background: #FAFAF8; position: sticky; top: 0; }
+  th {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); background: var(--panel); position: sticky; top: 0;
+    border-bottom: 1px solid var(--rule);
+  }
   td { color: var(--ink); }
   td.right, th.right { text-align: right; font-variant-numeric: tabular-nums; }
   td.left, th.left { text-align: left; }
+  tbody tr:hover td { background: var(--panel); }
   tr:last-child td { border-bottom: none; }
 
   .foot {
-    color: var(--muted); font-size: .78rem; line-height: 1.7;
-    border-top: 1px solid var(--hairline); margin-top: 2.5rem; padding-top: 1rem;
+    color: var(--muted); font-size: .76rem; line-height: 1.75;
+    border-top: 3px double var(--rule); margin-top: 3rem; padding-top: 1.1rem;
   }
 
   @media (max-width: 820px) {
-    h1.hero { white-space: normal; }
     .kpi-grid { grid-template-columns: 1fr; }
     .two-col { grid-template-columns: 1fr; }
-    .tabs { gap: 1rem; overflow-x: auto; }
+    .tabs { gap: 1.15rem; overflow-x: auto; }
+    .masthead-inner { flex-direction: column; align-items: flex-start; gap: .35rem; }
   }
 </style>
 </head>
 <body>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <div class="wordmark"><span class="mark">Labor Market Monitor</span></div>
+    <div class="asof">As of {{ period }}</div>
+  </div>
+</header>
+
 <div class="wrap">
 
-  <div class="eyebrow">U.S. economic indicators</div>
-  <h1 class="hero">Labor Market KPIs <span class="period">({{ period }})</span></h1>
+  <div class="eyebrow">Economic Research &nbsp;·&nbsp; United States</div>
+  <h1 class="hero">U.S. Labor Market <span class="period">{{ period }}</span></h1>
   <p class="hero-sub">Employment, unemployment, participation, wages and job turnover —
      the monthly picture from the Bureau of Labor Statistics, with a state
      cross-section from the Census Bureau.</p>
@@ -200,9 +277,9 @@
   <section class="panel" id="states">
     <div class="section-h">State unemployment vs the national rate</div>
     <div class="section-note">Deviation from the national U-3 rate of {{ national_now }}%.
-      Blue states are running below the national rate, orange above. State figures
-      lag the national release — latest available is {{ state_period }}.</div>
-    <div class="card">{{ chart_choropleth | safe }}</div>
+      States shaded blue are running below the national rate, gold above. State
+      figures lag the national release — latest available is {{ state_period }}.</div>
+    <div class="card card--map">{{ chart_choropleth | safe }}</div>
 
     <div class="section-h">Ranked — highest and lowest</div>
     <div class="card">{{ chart_ranked | safe }}</div>
@@ -242,10 +319,24 @@
 <script>
   const buttons = document.querySelectorAll('.tab-btn');
   const panels = document.querySelectorAll('.panel');
+
+  // Size each Plotly chart to its container the first time its panel is shown.
+  // The choropleth is served with responsive:false, so this is the only resize
+  // it ever gets — after this it stays fixed and window resizes leave it alone.
+  function sizeChartsOnce(panel) {
+    if (!window.Plotly) return;
+    panel.querySelectorAll('.js-plotly-plot').forEach(el => {
+      if (el.dataset.sized) return;
+      el.dataset.sized = '1';
+      window.Plotly.Plots.resize(el);
+    });
+  }
+
   buttons.forEach(btn => btn.addEventListener('click', () => {
     buttons.forEach(b => b.classList.toggle('active', b === btn));
     const id = btn.dataset.tab;
     panels.forEach(p => p.classList.toggle('active', p.id === id));
+    sizeChartsOnce(document.getElementById(id));
     window.scrollTo({ top: 0 });
   }));
 </script>
