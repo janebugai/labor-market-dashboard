@@ -127,10 +127,6 @@ st.markdown(
         border-radius: 14px; padding: 1rem 1.1rem 0.6rem; height: 100%;
     }}
 
-    [data-testid="stMetric"] {{
-        background: {SURFACE}; border: 1px solid {HAIRLINE};
-        border-radius: 12px; padding: 0.85rem 1rem;
-    }}
     [data-testid="stPlotlyChart"] {{
         background: {SURFACE}; border: 1px solid {HAIRLINE};
         border-radius: 14px; padding: 0.4rem 0.6rem; overflow: hidden;
@@ -311,8 +307,8 @@ def latest_dot(fig, d, color, y_fmt):
     )
 
 
-def line_panel(specs, title, y_fmt, hover_unit="", height=380, recessions=True, rec_label=True):
-    """specs: list of (series_name, label, color)."""
+def line_panel(specs, title, y_fmt, hover_unit="", height=380, rec_label=True):
+    """specs: list of (series_name, label, color). One panel, NBER recession shaded."""
     fig = go.Figure()
     multi = len(specs) > 1
     for name, label, color in specs:
@@ -325,8 +321,7 @@ def line_panel(specs, title, y_fmt, hover_unit="", height=380, recessions=True, 
         latest_dot(fig, d, color, y_fmt)
     fig.update_layout(title=title)
     theme(fig, height=height, legend=multi)
-    if recessions:
-        add_recessions(fig, label=rec_label)
+    add_recessions(fig, label=rec_label)
     # headroom on the right so the latest-value labels aren't clipped
     span = national_df["date"].max() - national_df["date"].min()
     fig.update_xaxes(range=[national_df["date"].min(),
@@ -334,19 +329,18 @@ def line_panel(specs, title, y_fmt, hover_unit="", height=380, recessions=True, 
     return fig
 
 
-def kpi_chart(d, color, years=5):
+def kpi_chart(history, years=5):
     """A compact but real line chart for a KPI card: x = years, y = value."""
-    cutoff = d["date"].max() - pd.DateOffset(years=years)
-    d = d[d["date"] >= cutoff]
+    d = history[history["date"] >= history["date"].max() - pd.DateOffset(years=years)]
     fig = go.Figure(go.Scatter(
         x=d["date"], y=d["value"], mode="lines",
-        line=dict(color=color, width=1.8),
+        line=dict(color=ACCENT, width=1.8),
         hovertemplate="%{x|%b %Y}: %{y:,.1f}<extra></extra>",
     ))
     last = d.iloc[-1]
     fig.add_trace(go.Scatter(
         x=[last["date"]], y=[last["value"]], mode="markers",
-        marker=dict(color=color, size=6, line=dict(color=SURFACE, width=1.5)),
+        marker=dict(color=ACCENT, size=6, line=dict(color=SURFACE, width=1.5)),
         hoverinfo="skip", showlegend=False,
     ))
     fig.update_layout(
@@ -395,7 +389,7 @@ def render_kpi(col, name):
             )
             if snap is not None:
                 st.plotly_chart(
-                    kpi_chart(snap["history"], ACCENT),
+                    kpi_chart(snap["history"]),
                     width="stretch", key=f"kpi-{name}",
                     config={"displayModeBar": False},
                 )
@@ -475,8 +469,8 @@ tab_overview, tab_detail, tab_states, tab_demo = st.tabs(
 with tab_overview:
     st.markdown('<div class="section-h">Headline indicators</div>', unsafe_allow_html=True)
     st.markdown(
-        f'<div class="section-note">Latest reading, month-over-month and '
-        f'year-over-year change; each chart traces the last five years.</div>',
+        '<div class="section-note">Latest reading, month-over-month and '
+        'year-over-year change; each chart traces the last five years.</div>',
         unsafe_allow_html=True,
     )
 
@@ -520,7 +514,7 @@ with tab_overview:
     ))
     bar.update_layout(title="Monthly change in nonfarm payrolls — last 3 years")
     theme(bar, height=340, legend=False)
-    bar.update_yaxes(ticksuffix="", zeroline=True, zerolinecolor=HAIRLINE)
+    bar.update_yaxes(zeroline=True, zerolinecolor=HAIRLINE)
     st.plotly_chart(bar, width="stretch", config={"displayModeBar": False})
 
 # ==========================================================================
@@ -554,7 +548,7 @@ with tab_detail:
         st.plotly_chart(
             line_panel(
                 [("avg_hourly_earnings", "Avg hourly earnings", SERIES[0])],
-                "Average hourly earnings", lambda v: f"${v:.2f}", hover_unit="",
+                "Average hourly earnings", lambda v: f"${v:.2f}",
                 height=320, rec_label=False,
             ),
             width="stretch", config={"displayModeBar": False},
