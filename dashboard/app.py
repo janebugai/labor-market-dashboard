@@ -116,7 +116,7 @@ st.markdown(
         font-size: clamp(0.9rem, 1.8vw, 1.4rem);
         font-weight: 700;
         letter-spacing: 0;
-        margin-left: 0.6rem;
+        margin-right: 0.6rem;
         vertical-align: 0.35em;
         white-space: nowrap;
     }}
@@ -301,7 +301,7 @@ with dashboard:
     st.markdown(
         f"""
         <div class="hero-kicker">U.S. economic indicators</div>
-        <div class="hero-title">Labor Market<span class="hero-period">{latest_period}</span></div>
+        <div class="hero-title"><span class="hero-period">{latest_period}</span>Labor Market KPIs</div>
         <div class="hero-copy">
             Explore the latest trends in employment, unemployment,
             wages, and state labor-force conditions.
