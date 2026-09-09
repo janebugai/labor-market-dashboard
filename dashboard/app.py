@@ -72,7 +72,7 @@ STATE_ABBR_BY_FIPS = {
     "54": "WV", "55": "WI", "56": "WY", "72": "PR",
 }
 
-st.set_page_config(page_title="U.S. Labor Market Dashboard", layout="wide")
+st.set_page_config(page_title="Labor Market KPIs", layout="wide")
 
 st.markdown(
     f"""
@@ -91,11 +91,13 @@ st.markdown(
     }}
     .hero-title {{
         font-family: Georgia, 'Times New Roman', serif;
-        font-size: clamp(2rem, 4.4vw, 3.4rem); font-weight: 700;
+        font-size: clamp(1.9rem, 4.2vw, 3.1rem); font-weight: 700;
         letter-spacing: -0.03em; line-height: 1.02; margin: 0.35rem 0 0.5rem;
+        white-space: nowrap;
     }}
     .hero-period {{ color: {ACCENT}; font-family: {FONT_STACK};
-        font-weight: 700; font-size: 0.5em; vertical-align: 0.42em; }}
+        font-weight: 700; font-size: 0.34em; vertical-align: baseline;
+        letter-spacing: 0; margin-left: 0.35em; white-space: nowrap; }}
     .hero-sub {{ color: {INK_MUTED}; font-size: 0.95rem; line-height: 1.6;
         max-width: 62ch; margin-bottom: 0.4rem; }}
 
@@ -107,13 +109,7 @@ st.markdown(
     .summary .lede {{ color: {INK_MUTED}; font-size: 0.72rem; font-weight: 700;
         letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 0.5rem; }}
 
-    .kpi {{
-        background: {SURFACE}; border: 1px solid {HAIRLINE}; border-radius: 14px;
-        padding: 1rem 1.1rem 0.9rem; height: 100%;
-    }}
     .kpi-head {{ min-height: 2.4rem; }}
-    .kpi-spark {{ margin-top: 0.75rem; height: 44px; }}
-    .kpi-spark svg {{ height: 44px; overflow: visible; }}
     .kpi-label {{ display: block; font-size: 0.82rem; font-weight: 700;
         color: {INK}; line-height: 1.25; }}
     .kpi-tag {{ display: block; font-size: 0.64rem; font-weight: 600;
@@ -125,6 +121,12 @@ st.markdown(
     .kpi-delta .muted {{ color: {INK_MUTED}; font-weight: 500; }}
     .pos {{ color: {POS}; }} .neg {{ color: {NEG}; }} .flat {{ color: {INK_MUTED}; }}
 
+    /* KPI card = a bordered st.container holding text + a mini chart */
+    [data-testid="stVerticalBlockBorderWrapper"] {{
+        background: {SURFACE}; border: 1px solid {HAIRLINE};
+        border-radius: 14px; padding: 1rem 1.1rem 0.6rem; height: 100%;
+    }}
+
     [data-testid="stMetric"] {{
         background: {SURFACE}; border: 1px solid {HAIRLINE};
         border-radius: 12px; padding: 0.85rem 1rem;
@@ -132,6 +134,12 @@ st.markdown(
     [data-testid="stPlotlyChart"] {{
         background: {SURFACE}; border: 1px solid {HAIRLINE};
         border-radius: 14px; padding: 0.4rem 0.6rem; overflow: hidden;
+    }}
+    /* KPI-card mini charts sit inside the card — no inner box */
+    [class*="st-key-kpi-"] [data-testid="stPlotlyChart"] {{
+        background: transparent !important; border: none !important;
+        padding: 0 !important; border-radius: 0 !important;
+        overflow: visible !important; margin-top: 0.3rem;
     }}
     [data-testid="stDataFrame"] {{ border: 1px solid {HAIRLINE}; border-radius: 12px; }}
 
@@ -326,55 +334,71 @@ def line_panel(specs, title, y_fmt, hover_unit="", height=380, recessions=True, 
     return fig
 
 
-def sparkline_svg(values, color=ACCENT, width=320, height=44, pad=5):
-    vs = [float(v) for v in values if pd.notna(v)]
-    if len(vs) < 2:
-        return ""
-    lo, hi = min(vs), max(vs)
-    rng = (hi - lo) or 1.0
-    n = len(vs)
-    xs = [pad + i * (width - 2 * pad) / (n - 1) for i in range(n)]
-    ys = [height - pad - (v - lo) / rng * (height - 2 * pad) for v in vs]
-    pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
-    return (
-        f'<svg viewBox="0 0 {width} {height}" width="100%" preserveAspectRatio="none" '
-        f'style="display:block">'
-        f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="1.5" '
-        f'stroke-linejoin="round" vector-effect="non-scaling-stroke"/>'
-        f'<circle cx="{xs[-1]:.1f}" cy="{ys[-1]:.1f}" r="2.6" fill="{color}" '
-        f'vector-effect="non-scaling-stroke"/></svg>'
+def kpi_chart(d, color, years=5):
+    """A compact but real line chart for a KPI card: x = years, y = value."""
+    cutoff = d["date"].max() - pd.DateOffset(years=years)
+    d = d[d["date"] >= cutoff]
+    fig = go.Figure(go.Scatter(
+        x=d["date"], y=d["value"], mode="lines",
+        line=dict(color=color, width=1.8),
+        hovertemplate="%{x|%b %Y}: %{y:,.1f}<extra></extra>",
+    ))
+    last = d.iloc[-1]
+    fig.add_trace(go.Scatter(
+        x=[last["date"]], y=[last["value"]], mode="markers",
+        marker=dict(color=color, size=6, line=dict(color=SURFACE, width=1.5)),
+        hoverinfo="skip", showlegend=False,
+    ))
+    fig.update_layout(
+        height=150, margin=dict(l=36, r=10, t=6, b=20),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False, hovermode="x",
+        hoverlabel=dict(bgcolor=INK, font_color="white", font_size=11),
     )
+    fig.update_xaxes(
+        tick0="2000-01-01", dtick="M12", tickformat="%Y", showgrid=False,
+        linecolor="rgba(0,0,0,0)", tickcolor="rgba(0,0,0,0)", ticks="",
+        tickfont=dict(color=INK_MUTED, size=10),
+    )
+    fig.update_yaxes(
+        nticks=4, gridcolor=GRID, zeroline=False, linecolor="rgba(0,0,0,0)",
+        ticks="", tickfont=dict(color=INK_MUTED, size=10),
+    )
+    return fig
 
 
-def render_kpi(col, name, spark_months=36):
+def render_kpi(col, name):
     snap = SNAP[name]
     meta = SERIES_META[name]
     if snap is None:
-        spark, dc, mom, yoy, val = "", "flat", "—", "—", "—"
+        dc, mom, yoy, val = "flat", "—", "—", "—"
     else:
-        spark = sparkline_svg(snap["history"]["value"].tail(spark_months))
         dc = delta_class(name, snap["mom"])
         mom = fmt_delta(name, snap["mom"])
         yoy = fmt_delta(name, snap["yoy"])
         val = fmt_value(name, snap["value"])
     with col:
-        st.markdown(
-            f"""
-            <div class="kpi">
-              <div class="kpi-head">
-                <span class="kpi-label">{meta['label']}</span>
-                <span class="kpi-tag">{meta['tag']}</span>
-              </div>
-              <div class="kpi-value">{val}</div>
-              <div class="kpi-delta">
-                <span class="{dc}">{mom} MoM</span>
-                <span class="muted"> &nbsp;·&nbsp; {yoy} YoY</span>
-              </div>
-              <div class="kpi-spark">{spark}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        with st.container(border=True):
+            st.markdown(
+                f"""
+                <div class="kpi-head">
+                  <span class="kpi-label">{meta['label']}</span>
+                  <span class="kpi-tag">{meta['tag']}</span>
+                </div>
+                <div class="kpi-value">{val}</div>
+                <div class="kpi-delta">
+                  <span class="{dc}">{mom} MoM</span>
+                  <span class="muted"> &nbsp;·&nbsp; {yoy} YoY</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if snap is not None:
+                st.plotly_chart(
+                    kpi_chart(snap["history"], ACCENT),
+                    width="stretch", key=f"kpi-{name}",
+                    config={"displayModeBar": False},
+                )
 
 
 # --------------------------------------------------------------------------
@@ -426,8 +450,8 @@ def build_summary():
 st.markdown(
     f"""
     <div class="eyebrow">U.S. economic indicators</div>
-    <div class="hero-title">The Labor Market
-        <span class="hero-period">{month_label(LATEST_PERIOD)}</span></div>
+    <div class="hero-title">Labor Market KPIs
+        <span class="hero-period">({month_label(LATEST_PERIOD)})</span></div>
     <div class="hero-sub">Employment, unemployment, participation, wages and job
         turnover — the monthly picture from the Bureau of Labor Statistics,
         with a state cross-section from the Census Bureau.</div>
@@ -452,7 +476,7 @@ with tab_overview:
     st.markdown('<div class="section-h">Headline indicators</div>', unsafe_allow_html=True)
     st.markdown(
         f'<div class="section-note">Latest reading, month-over-month and '
-        f'year-over-year change. Sparklines show the last three years.</div>',
+        f'year-over-year change; each chart traces the last five years.</div>',
         unsafe_allow_html=True,
     )
 
